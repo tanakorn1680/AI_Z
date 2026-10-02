@@ -33,6 +33,7 @@ export async function planTasksFromInstruction(
     managerAgentId: string
     managerProvider: string
     managerModel: string
+    managerBaseUrl?: string | null
     apiKey: string
     maxTasksPerRun: number
   }
@@ -45,6 +46,7 @@ export async function planTasksFromInstruction(
     systemPrompt: PLANNER_SYSTEM_PROMPT,
     userPrompt: params.instruction,
     maxTokens: 2048,
+    baseUrl: params.managerBaseUrl ?? undefined,
   })
 
   let parsed: { tasks: PlannedTask[] }

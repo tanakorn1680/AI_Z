@@ -1,8 +1,9 @@
 import { requireUser } from '@/lib/supabase/auth'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { apiOk, apiError, parseBody, requireFields } from '@/lib/utils/api'
 import { sanitizeText, sanitizeShort, isValidEnum, isValidUUID } from '@/lib/utils/sanitize'
+import { PROVIDER_IDS, getProviderMeta, validateBaseUrl } from '@/lib/ai/providers'
 
-const PROVIDERS = ['anthropic', 'openai', 'google'] as const
 const ROLES = ['manager', 'researcher', 'coder', 'reviewer', 'custom'] as const
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -16,11 +17,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   interface AgentListRow {
     id: string; name: string; provider: string; model: string; role: string
     system_prompt: string; allowed_tools: string[]; max_tokens: number | null
+    base_url: string | null
   }
   const { data, error } = await auth.supabase
     .from<AgentListRow>('agents')
-    .select('id, name, provider, model, role, system_prompt, allowed_tools, max_tokens')
+    .select('id, name, provider, model, role, system_prompt, allowed_tools, max_tokens, base_url')
     .eq('project_id', id)
+    .order('created_at', { ascending: true })
   if (error) return apiError('INTERNAL_ERROR', error.message)
 
   return apiOk({ agents: data })
@@ -36,28 +39,81 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const [body, err] = await parseBody<{
     name: string; provider: string; model: string; role: string
     system_prompt?: string; max_tokens?: number
+    base_url?: string
+    /** ราคาต่อ 1 ล้าน token (USD) — ไม่บังคับ ใช้คำนวณค่าใช้จ่าย/คุมงบ */
+    price_in?: number; price_out?: number
   }>(req)
   if (err) return err
   const missing = requireFields(body, ['name', 'provider', 'model', 'role'])
   if (missing) return missing
-  if (!isValidEnum(body.provider, PROVIDERS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
+  if (!isValidEnum(body.provider, PROVIDER_IDS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
   if (!isValidEnum(body.role, ROLES)) return apiError('BAD_REQUEST', 'role ไม่ถูกต้อง')
+
+  const name = sanitizeShort(body.name, 100)
+  const model = sanitizeShort(body.model, 100)
+  if (!name || !model) return apiError('BAD_REQUEST', 'ชื่อและ model ต้องไม่ว่าง')
+
+  // custom provider ต้องมี base URL ที่ผ่านการตรวจ; provider อื่นใช้ URL ของระบบเอง
+  let baseUrl: string | null = null
+  if (getProviderMeta(body.provider)?.customBaseUrl) {
+    const check = validateBaseUrl(body.base_url)
+    if (!check.ok) return apiError('BAD_REQUEST', check.error)
+    baseUrl = check.url
+  }
+
+  let maxTokens: number | null = null
+  if (body.max_tokens !== undefined && body.max_tokens !== null) {
+    const n = Number(body.max_tokens)
+    if (!Number.isInteger(n) || n < 1 || n > 200000) {
+      return apiError('BAD_REQUEST', 'max_tokens ต้องเป็นจำนวนเต็ม 1–200000')
+    }
+    maxTokens = n
+  }
+
+  const hasPrice = body.price_in !== undefined && body.price_in !== null
+    || body.price_out !== undefined && body.price_out !== null
+  let priceIn = 0
+  let priceOut = 0
+  if (hasPrice) {
+    priceIn = Number(body.price_in)
+    priceOut = Number(body.price_out)
+    const ok = [priceIn, priceOut].every((p) => Number.isFinite(p) && p >= 0 && p <= 100000)
+    if (!ok) return apiError('BAD_REQUEST', 'ราคาต้องเป็นตัวเลข 0–100000 (USD ต่อ 1 ล้าน token) และต้องกรอกทั้งขาเข้าและขาออก')
+  }
 
   const { data, error } = await auth.supabase
     .from<{ id: string }>('agents')
     .insert({
       project_id: id,
-      name: sanitizeShort(body.name),
+      name,
       provider: body.provider,
-      model: sanitizeShort(body.model, 100),
+      model,
       role: body.role,
       system_prompt: body.system_prompt ? sanitizeText(body.system_prompt) : '',
-      max_tokens: body.max_tokens ?? null,
+      max_tokens: maxTokens,
+      base_url: baseUrl,
     })
     .select('id')
     .single()
-  // RLS/trigger จะปฏิเสธถ้า project ไม่ใช่ของผู้ใช้ — สะท้อนเป็น error ตรงนี้
-  if (error) return apiError('FORBIDDEN', error.message)
+  if (error) {
+    if (error.code === '23505') return apiError('BAD_REQUEST', `มี agent ชื่อ "${name}" ใน project นี้แล้ว`)
+    // RLS/trigger จะปฏิเสธถ้า project ไม่ใช่ของผู้ใช้ — สะท้อนเป็น error ตรงนี้
+    return apiError('FORBIDDEN', error.message)
+  }
 
-  return apiOk({ agent: data }, 201)
+  // ราคา: เพิ่มเฉพาะรุ่นที่ยังไม่มีราคา ไม่เขียนทับ (ตารางนี้ใช้ร่วมกันทุก project)
+  // ทำหลัง insert agent สำเร็จเท่านั้น = ยืนยันแล้วว่าผู้เรียกเป็นเจ้าของ project
+  let priceSaved = false
+  if (hasPrice) {
+    const admin = createAdminClient()
+    const { error: priceError } = await admin
+      .from('model_prices')
+      .upsert(
+        { provider: body.provider, model, in_per_mtok: priceIn, out_per_mtok: priceOut },
+        { onConflict: 'provider,model', ignoreDuplicates: true }
+      )
+    priceSaved = !priceError
+  }
+
+  return apiOk({ agent: data, price_saved: priceSaved }, 201)
 }

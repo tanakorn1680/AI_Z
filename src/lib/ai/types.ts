@@ -10,6 +10,8 @@ export interface CompletionRequest {
   systemPrompt: string
   userPrompt: string
   maxTokens: number
+  /** ใช้เฉพาะ provider แบบ custom (OpenAI-compatible) */
+  baseUrl?: string
 }
 
 export interface CompletionResult {

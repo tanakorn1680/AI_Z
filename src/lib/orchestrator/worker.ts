@@ -32,10 +32,10 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       throw new Error('Task นี้ไม่มี agent ผูกอยู่ — ผู้ใช้ต้องเลือก agent ก่อน')
     }
 
-    interface AgentRow { provider: string; model: string; system_prompt: string; max_tokens: number | null }
+    interface AgentRow { provider: string; model: string; system_prompt: string; max_tokens: number | null; base_url: string | null }
     const { data: agent, error: agentError } = await admin
       .from<AgentRow>('agents')
-      .select('provider, model, system_prompt, max_tokens')
+      .select('provider, model, system_prompt, max_tokens, base_url')
       .eq('id', task.assigned_agent)
       .single()
     if (agentError || !agent) throw new Error('หา agent ที่ผูกกับ task นี้ไม่เจอ')
@@ -65,6 +65,7 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       systemPrompt: agent.system_prompt,
       userPrompt: contextPrompt,
       maxTokens: agent.max_tokens ?? project?.max_tokens_per_task ?? 4096,
+      baseUrl: agent.base_url ?? undefined,
     })
 
     // summary สั้น ๆ สำหรับส่งต่อ Task ถัดไป (ประหยัด token ตามหลัก Context Management)

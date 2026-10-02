@@ -2,8 +2,7 @@ import { requireUser } from '@/lib/supabase/auth'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { apiOk, apiError, parseBody, requireFields } from '@/lib/utils/api'
 import { isValidEnum } from '@/lib/utils/sanitize'
-
-const PROVIDERS = ['anthropic', 'openai', 'google'] as const
+import { PROVIDER_IDS } from '@/lib/ai/providers'
 
 /**
  * BYOK: key จริงไม่เคยผ่าน route นี้กลับออกไป — เขียนเข้า Vault แล้วคืนแค่ last4
@@ -30,7 +29,8 @@ export async function POST(req: Request) {
   if (err) return err
   const missing = requireFields(body, ['provider', 'api_key'])
   if (missing) return missing
-  if (!isValidEnum(body.provider, PROVIDERS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
+  if (!isValidEnum(body.provider, PROVIDER_IDS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
+  body.api_key = body.api_key.trim()
   if (body.api_key.length < 8 || body.api_key.length > 500) {
     return apiError('BAD_REQUEST', 'API key ความยาวไม่สมเหตุสมผล')
   }
@@ -52,7 +52,7 @@ export async function DELETE(req: Request) {
 
   const url = new URL(req.url)
   const provider = url.searchParams.get('provider') ?? ''
-  if (!isValidEnum(provider, PROVIDERS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
+  if (!isValidEnum(provider, PROVIDER_IDS)) return apiError('BAD_REQUEST', 'provider ไม่ถูกต้อง')
 
   const admin = createAdminClient()
   const { error } = await admin.rpc('delete_api_key', { p_user_id: auth.user.id, p_provider: provider })

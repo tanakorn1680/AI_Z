@@ -31,7 +31,8 @@ create type public.agent_role as enum
   ('manager', 'researcher', 'coder', 'reviewer', 'custom');
 
 create type public.provider_name as enum
-  ('anthropic', 'openai', 'google');
+  ('anthropic', 'openai', 'google',
+   'openrouter', 'deepseek', 'groq', 'xai', 'mistral', 'together', 'custom');
 
 create type public.message_role as enum
   ('user', 'assistant', 'system');
@@ -91,6 +92,8 @@ create table public.agents (
   -- ค่าเริ่มต้นเป็นสิทธิ์น้อยที่สุด (อ่านไฟล์ได้อย่างเดียว) — Backend เป็นผู้บังคับใช้
   allowed_tools text[] not null default array['read_file']::text[],
   max_tokens    integer check (max_tokens is null or max_tokens between 1 and 200000),
+  -- ใช้เฉพาะ provider = 'custom' (endpoint แบบ OpenAI-compatible ที่ผู้ใช้กรอกเอง)
+  base_url      text check (base_url is null or char_length(base_url) <= 300),
   created_at    timestamptz not null default now(),
   unique (project_id, name)
 );

@@ -37,10 +37,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return apiError('BUDGET_EXCEEDED', 'โปรเจกต์นี้ใช้งบหมดแล้ว เพิ่ม budget ก่อนสั่งงานใหม่')
   }
 
-  interface ManagerAgentRow { id: string; provider: string; model: string }
+  interface ManagerAgentRow { id: string; provider: string; model: string; base_url: string | null }
   const { data: managerAgent, error: agentError } = await auth.supabase
     .from<ManagerAgentRow>('agents')
-    .select('id, provider, model')
+    .select('id, provider, model, base_url')
     .eq('project_id', projectId)
     .eq('role', 'manager')
     .limit(1)
@@ -68,6 +68,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       managerAgentId: managerAgent.id,
       managerProvider: managerAgent.provider,
       managerModel: managerAgent.model,
+      managerBaseUrl: managerAgent.base_url,
       apiKey,
       maxTasksPerRun: project.max_tasks_per_run,
     })

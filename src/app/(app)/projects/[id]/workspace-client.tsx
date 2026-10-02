@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
+import AgentsPanel, { type Agent } from './agents-panel'
 
 type Tab = 'chat' | 'agents' | 'tasks' | 'files' | 'usage'
 
@@ -17,14 +18,6 @@ interface TaskRow {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   error: string | null
   created_at: string
-}
-
-interface Agent {
-  id: string
-  name: string
-  provider: string
-  model: string
-  role: string
 }
 
 // polling แทน Realtime ตามหลักการของสเปค (ข้อ 2: ถ้าไม่จำเป็นต้องใช้ Realtime ให้ใช้ Polling)
@@ -146,21 +139,7 @@ export default function WorkspaceClient({
         )}
 
         {tab === 'agents' && (
-          <div className="space-y-2">
-            {agents.map((a) => (
-              <div key={a.id} className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm">
-                <div className="font-medium">{a.name}</div>
-                <div className="text-neutral-400">
-                  {a.role} · {a.provider}/{a.model}
-                </div>
-              </div>
-            ))}
-            {agents.length === 0 && (
-              <p className="text-sm text-neutral-500">
-                ยังไม่มี Agent — เพิ่มอย่างน้อย 1 ตัวที่มี role &quot;manager&quot; ก่อนสั่งงาน
-              </p>
-            )}
-          </div>
+          <AgentsPanel projectId={projectId} agents={agents} onChanged={refresh} />
         )}
 
         {tab === 'tasks' && (
