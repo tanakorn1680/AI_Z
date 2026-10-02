@@ -10,8 +10,8 @@ import {
 // รูปแบบ response ของ models.generateContent เท่าที่เราต้องใช้จริง
 // (ยืนยันจากเอกสาร ai.google.dev — Gemini แยก systemInstruction ออกจาก contents)
 interface GeminiGenerateContentResponse {
-  candidates: Array<{ content: { parts: Array<{ text?: string }> } }>
-  usageMetadata: { promptTokenCount: number; candidatesTokenCount: number }
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
 }
 
 export const geminiAdapter: ProviderAdapter = {
@@ -26,7 +26,9 @@ export const geminiAdapter: ProviderAdapter = {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: req.systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text: req.userPrompt }] }],
-        generationConfig: { maxOutputTokens: req.maxTokens },
+        // รุ่น thinking (2.5+/3.x) นับ token ที่ "คิด" รวมใน maxOutputTokens ถ้าเพดานต่ำ คำตอบจริงจะถูกตัดจนว่าง
+        // จึงเผื่อ headroom (จำกัดไม่เกิน 32768 ให้ใช้ได้กับทุกรุ่น)
+        generationConfig: { maxOutputTokens: Math.min(req.maxTokens + 8192, 32768) },
       }),
     })
 
@@ -40,12 +42,16 @@ export const geminiAdapter: ProviderAdapter = {
     }
 
     const data = (await res.json()) as GeminiGenerateContentResponse
-    const text = data.candidates[0]?.content.parts.map((p) => p.text ?? '').join('') ?? ''
+    const cand = data.candidates?.[0]
+    const text = (cand?.content?.parts ?? []).map((p) => p.text ?? '').join('')
+    if (!text) {
+      throw new ProviderError(`Gemini ไม่ส่งข้อความกลับมา (finishReason: ${cand?.finishReason ?? 'ไม่ทราบ'})`)
+    }
 
     return {
       text,
-      tokensIn: data.usageMetadata.promptTokenCount,
-      tokensOut: data.usageMetadata.candidatesTokenCount,
+      tokensIn: data.usageMetadata?.promptTokenCount ?? 0,
+      tokensOut: data.usageMetadata?.candidatesTokenCount ?? 0,
     }
   },
 }

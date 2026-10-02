@@ -12,6 +12,12 @@ export interface Agent {
   base_url?: string | null
 }
 
+interface ModelOption {
+  id: string
+  label: string
+  free?: boolean
+}
+
 interface Credential {
   id: string
   provider: string
@@ -198,6 +204,36 @@ function AddAgentForm({
   const [notice, setNotice] = useState('')
 
   const meta = getProviderMeta(provider)
+  const hasKey = keyedProviders.has(provider)
+
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  const [modelsError, setModelsError] = useState('')
+
+  const loadModels = useCallback(async () => {
+    setModelsState('loading')
+    setModelsError('')
+    const qs = new URLSearchParams({ provider })
+    if (meta?.customBaseUrl) qs.set('base_url', baseUrl)
+    const res = await fetch(`/api/models?${qs.toString()}`)
+    if (!res.ok) {
+      setModels([])
+      setModelsState('error')
+      setModelsError(await readError(res, 'ดึงรายชื่อรุ่นไม่สำเร็จ'))
+      return
+    }
+    setModels(((await res.json()) as { models: ModelOption[] }).models ?? [])
+    setModelsState('ok')
+  }, [provider, baseUrl, meta?.customBaseUrl])
+
+  // เปลี่ยน provider → ล้างรายการเดิม; ถ้ามี key แล้ว (และไม่ใช่ custom) ดึงรายชื่ออัตโนมัติ
+  useEffect(() => {
+    setModels([])
+    setModelsState('idle')
+    setModelsError('')
+    if (hasKey && !meta?.customBaseUrl) void loadModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, hasKey])
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -285,9 +321,38 @@ function AddAgentForm({
               maxLength={100}
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="ชื่อรุ่นตามเอกสารของค่าย"
+              list="model-options"
+              autoComplete="off"
+              placeholder={models.length ? 'แตะเพื่อเลือกจากรายการ' : 'ชื่อรุ่นตามเอกสารของค่าย'}
               className={inputCls}
             />
+            <datalist id="model-options">
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                  {m.free ? ' (ฟรี)' : ''}
+                </option>
+              ))}
+            </datalist>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              {hasKey ? (
+                <button
+                  type="button"
+                  onClick={loadModels}
+                  disabled={modelsState === 'loading' || (meta?.customBaseUrl && !baseUrl.trim())}
+                  className="text-indigo-400 hover:underline disabled:opacity-50"
+                >
+                  {modelsState === 'loading' ? 'กำลังดึงรายชื่อ...' : 'ดึงรายชื่อรุ่น'}
+                </button>
+              ) : (
+                <span className="text-neutral-500">เพิ่ม API key ด้านล่างก่อน แล้วระบบจะดึงรายชื่อรุ่นให้เลือก</span>
+              )}
+              {modelsState === 'ok' && <span className="text-neutral-500">พบ {models.length} รุ่น</span>}
+              {modelsState === 'error' && <span className="text-red-400">{modelsError}</span>}
+            </div>
+            {modelsState === 'ok' && model.trim() !== '' && !models.some((m) => m.id === model.trim()) && (
+              <p className="mt-1 text-xs text-amber-400">ชื่อนี้ไม่อยู่ในรายการของ key นี้ — ตรวจตัวสะกดอีกครั้ง</p>
+            )}
           </div>
         </div>
 
