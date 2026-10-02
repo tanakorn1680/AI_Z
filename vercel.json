@@ -1,4 +1,5 @@
 {
+  "framework": "nextjs",
   "functions": {
     "src/app/api/worker/run-task/route.ts": {
       "experimentalTriggers": [{ "type": "queue/v2beta", "topic": "agent-tasks" }],
@@ -6,6 +7,6 @@
     }
   },
   "crons": [
-    { "path": "/api/worker/recover", "schedule": "0 * * * *" }
+    { "path": "/api/worker/recover", "schedule": "0 3 * * *" }
   ]
 }
