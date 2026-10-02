@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
 import AgentsPanel, { type Agent } from './agents-panel'
+import FilesPanel from './files-panel'
 
 type Tab = 'chat' | 'agents' | 'tasks' | 'files' | 'usage'
 
@@ -175,12 +176,7 @@ export default function WorkspaceClient({
           </div>
         )}
 
-        {tab === 'files' && (
-          <p className="text-sm text-neutral-500">
-            ยังไม่มีทั้ง UI และ API จัดการไฟล์ใน MVP นี้ — schema (`files`, `file_versions`) พร้อมใช้แล้ว
-            แต่ยังไม่มี endpoint เขียน route.ts เพิ่มเองได้ตาม pattern ของ `/api/projects/[id]/tasks`
-          </p>
-        )}
+        {tab === 'files' && <FilesPanel projectId={projectId} />}
 
         {tab === 'usage' && <UsagePanel projectId={projectId} />}
       </main>

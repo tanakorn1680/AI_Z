@@ -40,6 +40,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     name: string; provider: string; model: string; role: string
     system_prompt?: string; max_tokens?: number
     base_url?: string
+    /** อนุญาตให้ agent สร้าง/แก้ไฟล์ (ค่าเริ่มต้น: อนุญาต) */
+    can_write_files?: boolean
     /** ราคาต่อ 1 ล้าน token (USD) — ไม่บังคับ ใช้คำนวณค่าใช้จ่าย/คุมงบ */
     price_in?: number; price_out?: number
   }>(req)
@@ -92,6 +94,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       system_prompt: body.system_prompt ? sanitizeText(body.system_prompt) : '',
       max_tokens: maxTokens,
       base_url: baseUrl,
+      allowed_tools: body.can_write_files === false ? ['read_file'] : ['read_file', 'write_file'],
     })
     .select('id')
     .single()

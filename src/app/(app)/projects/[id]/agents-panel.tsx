@@ -10,6 +10,7 @@ export interface Agent {
   model: string
   role: string
   base_url?: string | null
+  allowed_tools?: string[]
 }
 
 interface ModelOption {
@@ -129,6 +130,17 @@ function AgentList({
 }) {
   const [error, setError] = useState('')
 
+  async function toggleWrite(a: Agent, value: boolean) {
+    setError('')
+    const res = await fetch(`/api/projects/${projectId}/agents/${a.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ can_write_files: value }),
+    })
+    if (!res.ok) setError(await readError(res, 'แก้สิทธิ์ไม่สำเร็จ'))
+    onChanged()
+  }
+
   async function remove(a: Agent) {
     if (!window.confirm(`ลบ agent "${a.name}" ?`)) return
     setError('')
@@ -159,6 +171,15 @@ function AgentList({
                   {a.role} · {meta?.label ?? a.provider} / {a.model}
                 </div>
                 {a.base_url && <div className="truncate text-xs text-neutral-500">{a.base_url}</div>}
+                <label className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-neutral-400">
+                  <input
+                    type="checkbox"
+                    checked={a.allowed_tools?.includes('write_file') ?? false}
+                    onChange={(e) => toggleWrite(a, e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  สร้าง/แก้ไฟล์ได้
+                </label>
                 {missingKey && (
                   <div className="mt-1 text-xs text-amber-400">
                     ยังไม่มี API key ของ {meta?.label ?? a.provider} — เพิ่มด้านล่าง
@@ -199,6 +220,7 @@ function AddAgentForm({
   const [baseUrl, setBaseUrl] = useState('')
   const [priceIn, setPriceIn] = useState('')
   const [priceOut, setPriceOut] = useState('')
+  const [canWriteFiles, setCanWriteFiles] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -248,6 +270,7 @@ function AddAgentForm({
       model,
       role,
       system_prompt: systemPrompt,
+      can_write_files: canWriteFiles,
     }
     if (maxTokens.trim()) payload.max_tokens = Number(maxTokens)
     if (meta?.customBaseUrl) payload.base_url = baseUrl
@@ -380,6 +403,16 @@ function AddAgentForm({
             className={inputCls}
           />
         </div>
+
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+          <input
+            type="checkbox"
+            checked={canWriteFiles}
+            onChange={(e) => setCanWriteFiles(e.target.checked)}
+            className="accent-indigo-500"
+          />
+          อนุญาตให้ agent นี้สร้าง/แก้ไฟล์ในแท็บ Files
+        </label>
 
         <details className="text-sm">
           <summary className="cursor-pointer text-neutral-400 hover:text-neutral-200">ตั้งค่าเพิ่มเติม</summary>

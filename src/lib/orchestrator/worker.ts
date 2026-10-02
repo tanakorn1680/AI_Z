@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAdapter } from '../ai/registry'
 import { completeWithRetry } from '../ai/retry'
+import { extractFiles, FILE_WRITE_INSTRUCTION } from '../files/extract'
+import { saveFileVersion } from '../files/save'
 import { InvalidApiKeyError } from '../ai/types'
 import { buildTaskContext } from './context-builder'
 import { calculateCost } from './pricing'
@@ -33,10 +35,10 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       throw new Error('Task นี้ไม่มี agent ผูกอยู่ — ผู้ใช้ต้องเลือก agent ก่อน')
     }
 
-    interface AgentRow { provider: string; model: string; system_prompt: string; max_tokens: number | null; base_url: string | null }
+    interface AgentRow { provider: string; model: string; system_prompt: string; max_tokens: number | null; base_url: string | null; allowed_tools: string[] | null }
     const { data: agent, error: agentError } = await admin
       .from<AgentRow>('agents')
-      .select('provider, model, system_prompt, max_tokens, base_url')
+      .select('provider, model, system_prompt, max_tokens, base_url, allowed_tools')
       .eq('id', task.assigned_agent)
       .single()
     if (agentError || !agent) throw new Error('หา agent ที่ผูกกับ task นี้ไม่เจอ')
@@ -57,13 +59,17 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       throw new InvalidApiKeyError(`ผู้ใช้ยังไม่ได้เพิ่ม API key ของ ${agent.provider}`)
     }
 
-    const contextPrompt = await buildTaskContext(admin, task)
+    // สิทธิ์ของ agent บังคับที่ฝั่ง Backend นี้เท่านั้น (allowed_tools ใน DB) ไม่เชื่อสิ่งที่โมเดลบอกเอง
+    const canReadFiles = agent.allowed_tools?.includes('read_file') ?? false
+    const canWriteFiles = agent.allowed_tools?.includes('write_file') ?? false
+
+    const contextPrompt = await buildTaskContext(admin, task, { includeFiles: canReadFiles })
     const adapter = getAdapter(agent.provider)
 
     const result = await completeWithRetry(adapter, {
       apiKey,
       model: agent.model,
-      systemPrompt: agent.system_prompt,
+      systemPrompt: canWriteFiles ? agent.system_prompt + FILE_WRITE_INSTRUCTION : agent.system_prompt,
       userPrompt: contextPrompt,
       maxTokens: agent.max_tokens ?? project?.max_tokens_per_task ?? 4096,
       baseUrl: agent.base_url ?? undefined,
@@ -71,7 +77,13 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
 
     // summary สั้น ๆ สำหรับส่งต่อ Task ถัดไป (ประหยัด token ตามหลัก Context Management)
     // MVP: ตัดความยาวแบบตรงไปตรงมา — ยังไม่เรียก AI ซ้ำเพื่อสรุป (เพิ่มทีหลังถ้าจำเป็นจริง)
-    const summary = result.text.length > 800 ? result.text.slice(0, 800) + '…' : result.text
+    // ไฟล์ที่ agent ส่งมา (<file path="...">) แยกออกจากข้อความ — summary/แชทใช้ข้อความที่แทนบล็อกไฟล์ด้วย [ไฟล์ path]
+    // เพื่อไม่ให้โค้ดทั้งก้อนไหลไปกิน token ของ task ถัดไป (task ถัดไปอ่านตัวไฟล์ได้จาก read_file)
+    const extracted = canWriteFiles
+      ? extractFiles(result.text)
+      : { files: [], text: result.text, skipped: [] as string[] }
+    const shownText = extracted.text
+    const summary = shownText.length > 800 ? shownText.slice(0, 800) + '…' : shownText
 
     const cost = await calculateCost(admin, agent.provider, agent.model, result.tokensIn, result.tokensOut)
 
@@ -89,10 +101,31 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
 
     // แสดงผลลัพธ์ของ task ในแชท (เดิมเก็บแค่ใน task_results ทำให้ผู้ใช้ไม่เห็นคำตอบ)
     // insert ไม่ throw — ถ้าพลาดก็แค่ไม่แสดงในแชท ไม่ทำให้ task ที่เสร็จแล้วกลายเป็น failed
+    // บันทึกไฟล์หลัง complete_task สำเร็จเท่านั้น (ถ้า task ถูก retry จะไม่สร้างเวอร์ชันซ้ำ)
+    // ไฟล์พลาดไม่ทำให้ task ล้ม — บอกผู้ใช้ในแชทแทน
+    const savedPaths: string[] = []
+    const failures: string[] = [...extracted.skipped]
+    for (const f of extracted.files.slice(0, 20)) {
+      const saved = await saveFileVersion(admin, {
+        projectId: task.project_id,
+        path: f.path,
+        content: f.content,
+        agentId: task.assigned_agent,
+      })
+      if (saved.ok) savedPaths.push(f.path)
+      else failures.push(`${f.path}: ${saved.error}`)
+    }
+    if (extracted.files.length > 20) failures.push(`เกิน 20 ไฟล์ต่อ task — ข้ามไฟล์ที่เหลือ ${extracted.files.length - 20} ไฟล์`)
+
+    const notes = [
+      savedPaths.length ? `บันทึกไฟล์แล้ว (ดูในแท็บ Files): ${savedPaths.join(', ')}` : '',
+      failures.length ? `บันทึกไฟล์ไม่สำเร็จ:\n${failures.join('\n')}` : '',
+    ].filter(Boolean)
+
     await admin.from('messages').insert({
       project_id: task.project_id,
       role: 'assistant',
-      content: `${task.title}\n\n${result.text}`,
+      content: [`${task.title}\n\n${shownText}`, ...notes].join('\n\n'),
       task_id: task.id,
     })
 
