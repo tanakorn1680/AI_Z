@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAdapter } from '../ai/registry'
 import { InvalidApiKeyError } from '../ai/types'
+import { completeWithRetry } from '../ai/retry'
 
 interface PlannedTask {
   title: string
@@ -40,7 +41,7 @@ export async function planTasksFromInstruction(
 ): Promise<{ taskCount: number }> {
   const adapter = getAdapter(params.managerProvider)
 
-  const result = await adapter.complete({
+  const result = await completeWithRetry(adapter, {
     apiKey: params.apiKey,
     model: params.managerModel,
     systemPrompt: PLANNER_SYSTEM_PROMPT,

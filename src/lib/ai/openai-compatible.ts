@@ -49,7 +49,7 @@ export function openaiCompatibleAdapter(presetBase?: string): ProviderAdapter {
       if (res.status === 429) throw new RateLimitError('rate limit')
       if (!res.ok) {
         const body = await res.text().catch(() => '')
-        throw new ProviderError(`provider error ${res.status}: ${body.slice(0, 500)}`)
+        throw new ProviderError(`provider error ${res.status}: ${body.slice(0, 500)}`, res.status)
       }
 
       const data = (await res.json()) as ChatCompletionsResponse

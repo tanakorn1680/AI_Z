@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAdapter } from '../ai/registry'
+import { completeWithRetry } from '../ai/retry'
 import { InvalidApiKeyError } from '../ai/types'
 import { buildTaskContext } from './context-builder'
 import { calculateCost } from './pricing'
@@ -59,7 +60,7 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
     const contextPrompt = await buildTaskContext(admin, task)
     const adapter = getAdapter(agent.provider)
 
-    const result = await adapter.complete({
+    const result = await completeWithRetry(adapter, {
       apiKey,
       model: agent.model,
       systemPrompt: agent.system_prompt,
@@ -85,6 +86,15 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       p_cost_usd: cost,
     })
     if (completeError) throw completeError
+
+    // แสดงผลลัพธ์ของ task ในแชท (เดิมเก็บแค่ใน task_results ทำให้ผู้ใช้ไม่เห็นคำตอบ)
+    // insert ไม่ throw — ถ้าพลาดก็แค่ไม่แสดงในแชท ไม่ทำให้ task ที่เสร็จแล้วกลายเป็น failed
+    await admin.from('messages').insert({
+      project_id: task.project_id,
+      role: 'assistant',
+      content: `${task.title}\n\n${result.text}`,
+      task_id: task.id,
+    })
 
     await enqueueReadyTasks(admin, task.project_id)
   } catch (err) {

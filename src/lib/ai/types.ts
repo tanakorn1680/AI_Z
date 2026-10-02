@@ -27,7 +27,11 @@ export class InvalidApiKeyError extends Error {}
 export class RateLimitError extends Error {}
 
 /** โยนเมื่อ provider error อื่น ๆ ที่ไม่ใช่ 2 เคสข้างบน */
-export class ProviderError extends Error {}
+export class ProviderError extends Error {
+  constructor(message: string, public status?: number) {
+    super(message)
+  }
+}
 
 export interface ProviderAdapter {
   complete(req: CompletionRequest): Promise<CompletionResult>

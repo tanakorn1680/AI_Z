@@ -35,7 +35,7 @@ export const anthropicAdapter: ProviderAdapter = {
     if (res.status === 429) throw new RateLimitError('Anthropic: rate limit')
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      throw new ProviderError(`Anthropic error ${res.status}: ${body.slice(0, 500)}`)
+      throw new ProviderError(`Anthropic error ${res.status}: ${body.slice(0, 500)}`, res.status)
     }
 
     const data = (await res.json()) as AnthropicMessageResponse

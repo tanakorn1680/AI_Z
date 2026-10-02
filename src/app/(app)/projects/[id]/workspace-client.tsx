@@ -125,7 +125,7 @@ export default function WorkspaceClient({
             {messages.map((m) => (
               <div
                 key={m.id}
-                className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                className={`max-w-[80%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${
                   m.role === 'user'
                     ? 'ml-auto bg-indigo-600 text-white'
                     : 'bg-neutral-900 text-neutral-200'

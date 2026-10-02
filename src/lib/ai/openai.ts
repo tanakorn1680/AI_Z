@@ -35,7 +35,7 @@ export const openaiAdapter: ProviderAdapter = {
     if (res.status === 429) throw new RateLimitError('OpenAI: rate limit')
     if (!res.ok) {
       const body = await res.text().catch(() => '')
-      throw new ProviderError(`OpenAI error ${res.status}: ${body.slice(0, 500)}`)
+      throw new ProviderError(`OpenAI error ${res.status}: ${body.slice(0, 500)}`, res.status)
     }
 
     const data = (await res.json()) as OpenAIChatResponse
