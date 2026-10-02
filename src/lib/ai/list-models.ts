@@ -101,5 +101,10 @@ export async function listModels(
 
   // รุ่นฟรีขึ้นก่อน, ถัดมา flash (เร็ว/ถูก), แล้วเรียงตามชื่อ
   const rank = (m: ModelOption) => (m.free ? 0 : /(^|[-/:._])(flash|mini|haiku|lite)([-/:._]|$)/i.test(m.id) ? 1 : 2)
-  return models.sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))
+  // Google: เรียงใหม่ → เก่า (ชื่อกลาง *-latest ก่อน แล้วเลขเวอร์ชันมาก → น้อย) รุ่นเก่ามักถูกปิดรับผู้ใช้ใหม่
+  const byName =
+    meta.kind === 'google'
+      ? (a: ModelOption, b: ModelOption) => b.id.localeCompare(a.id, undefined, { numeric: true })
+      : (a: ModelOption, b: ModelOption) => a.id.localeCompare(b.id)
+  return models.sort((a, b) => rank(a) - rank(b) || byName(a, b))
 }
