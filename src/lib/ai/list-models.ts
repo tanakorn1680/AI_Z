@@ -80,12 +80,18 @@ async function listOpenAICompatible(
   return out
 }
 
+export interface ListModelsResult {
+  models: ModelOption[]
+  /** live = ดึงจาก provider จริง, static = รายการสำรองของระบบ (provider ไม่มี endpoint รายชื่อรุ่น) */
+  source: 'live' | 'static'
+}
+
 /** ดึงรายชื่อรุ่นที่ key นี้เรียกได้จริง จาก provider โดยตรง */
 export async function listModels(
   provider: string,
   apiKey: string,
   customBaseUrl?: string | null
-): Promise<ModelOption[]> {
+): Promise<ListModelsResult> {
   const meta = getProviderMeta(provider)
   if (!meta) throw new ListModelsError('provider ไม่ถูกต้อง', 'bad_request')
 
@@ -96,7 +102,15 @@ export async function listModels(
   else {
     const check = validateBaseUrl(meta.baseUrl ?? customBaseUrl)
     if (!check.ok) throw new ListModelsError(`base URL ใช้ไม่ได้: ${check.error}`, 'bad_request')
-    models = await listOpenAICompatible(check.url, apiKey, false)
+    try {
+      models = await listOpenAICompatible(check.url, apiKey, false)
+    } catch (e) {
+      // key ผิดต้องบอกผู้ใช้ตรง ๆ แต่ถ้า provider แค่ไม่มี endpoint รายชื่อรุ่น (เช่น Z.ai) ใช้รายการสำรอง
+      if (e instanceof ListModelsError && e.kind !== 'invalid_key' && meta.fallbackModels) {
+        return { models: meta.fallbackModels.map((id) => ({ id, label: id })), source: 'static' }
+      }
+      throw e
+    }
   }
 
   // รุ่นฟรีขึ้นก่อน, ถัดมา flash (เร็ว/ถูก), แล้วเรียงตามชื่อ
@@ -106,5 +120,5 @@ export async function listModels(
     meta.kind === 'google'
       ? (a: ModelOption, b: ModelOption) => b.id.localeCompare(a.id, undefined, { numeric: true })
       : (a: ModelOption, b: ModelOption) => a.id.localeCompare(b.id)
-  return models.sort((a, b) => rank(a) - rank(b) || byName(a, b))
+  return { models: models.sort((a, b) => rank(a) - rank(b) || byName(a, b)), source: 'live' }
 }

@@ -25,8 +25,8 @@ export async function GET(req: Request) {
   if (!apiKey) return apiError('BAD_REQUEST', 'ยังไม่ได้เพิ่ม API key ของ provider นี้')
 
   try {
-    const models = await listModels(provider, apiKey, url.searchParams.get('base_url'))
-    return apiOk({ models })
+    const { models, source } = await listModels(provider, apiKey, url.searchParams.get('base_url'))
+    return apiOk({ models, source })
   } catch (e) {
     if (e instanceof ListModelsError) {
       return apiError(e.kind === 'upstream' ? 'INTERNAL_ERROR' : 'BAD_REQUEST', e.message)

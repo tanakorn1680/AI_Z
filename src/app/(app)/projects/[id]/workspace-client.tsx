@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
 import AgentsPanel, { type Agent } from './agents-panel'
 import FilesPanel from './files-panel'
+import UsagePanel from './usage-panel'
 
 type Tab = 'chat' | 'agents' | 'tasks' | 'files' | 'usage'
 
@@ -201,42 +202,6 @@ export default function WorkspaceClient({
           </div>
         </form>
       )}
-    </div>
-  )
-}
-
-function UsagePanel({ projectId }: { projectId: string }) {
-  const [data, setData] = useState<{
-    budget_usd: number | null
-    spent_usd: number
-    usage: Array<{ provider: string; model: string; cost_usd: number; created_at: string }>
-  } | null>(null)
-
-  useEffect(() => {
-    fetch(`/api/projects/${projectId}/usage`)
-      .then((r) => r.json())
-      .then(setData)
-  }, [projectId])
-
-  if (!data) return null
-
-  return (
-    <div>
-      <div className="mb-4 rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-        <p className="text-sm text-neutral-400">ใช้ไปแล้ว</p>
-        <p className="text-2xl font-semibold">
-          ${data.spent_usd.toFixed(4)}
-          {data.budget_usd !== null && <span className="text-neutral-500"> / ${data.budget_usd}</span>}
-        </p>
-      </div>
-      <div className="space-y-1">
-        {data.usage.map((u, i) => (
-          <div key={i} className="flex justify-between rounded-md bg-neutral-900 px-3 py-2 text-xs">
-            <span>{u.provider}/{u.model}</span>
-            <span>${u.cost_usd.toFixed(4)}</span>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

@@ -50,6 +50,18 @@ export async function planTasksFromInstruction(
     baseUrl: params.managerBaseUrl ?? undefined,
   })
 
+  // บันทึก token ของการวางแผน (ไม่มี task ผูก) — นับเฉพาะ token ไม่คิดเงิน/ไม่แตะ spent_usd เหมือนพฤติกรรมเดิม
+  // ทำก่อน parse เพื่อให้ token นับแม้ Manager ตอบผิดรูปแบบ
+  await admin.from('usage').insert({
+    project_id: params.projectId,
+    task_id: null,
+    provider: params.managerProvider,
+    model: params.managerModel,
+    tokens_in: result.tokensIn,
+    tokens_out: result.tokensOut,
+    cost_usd: 0,
+  })
+
   let parsed: { tasks: PlannedTask[] }
   try {
     // กันกรณีโมเดลใส่ code fence มาทั้งที่สั่งห้ามแล้ว

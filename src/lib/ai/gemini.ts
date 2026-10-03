@@ -11,7 +11,7 @@ import {
 // (ยืนยันจากเอกสาร ai.google.dev — Gemini แยก systemInstruction ออกจาก contents)
 interface GeminiGenerateContentResponse {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number }
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number }
 }
 
 export const geminiAdapter: ProviderAdapter = {
@@ -51,7 +51,8 @@ export const geminiAdapter: ProviderAdapter = {
     return {
       text,
       tokensIn: data.usageMetadata?.promptTokenCount ?? 0,
-      tokensOut: data.usageMetadata?.candidatesTokenCount ?? 0,
+      // token ที่ "คิด" ถูกนับแยกใน thoughtsTokenCount แต่กินโควตาจริง จึงรวมเข้าด้วย
+      tokensOut: (data.usageMetadata?.candidatesTokenCount ?? 0) + (data.usageMetadata?.thoughtsTokenCount ?? 0),
     }
   },
 }

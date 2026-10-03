@@ -17,6 +17,10 @@ export interface ProviderMeta {
   /** true = ผู้ใช้ต้องกรอก base URL เองต่อ agent */
   customBaseUrl?: boolean
   keyPlaceholder: string
+  /** รุ่นที่ "คิด" ก่อนตอบนับ token คิดรวมใน max_tokens — เผื่อเพดานเพิ่มเท่านี้ไม่ให้คำตอบจริงถูกตัด */
+  outputHeadroom?: number
+  /** รายชื่อรุ่นสำรอง ใช้เมื่อ provider ไม่มี endpoint รายชื่อรุ่นให้เรียก */
+  fallbackModels?: readonly string[]
 }
 
 export const PROVIDER_LIST: readonly ProviderMeta[] = [
@@ -29,6 +33,15 @@ export const PROVIDER_LIST: readonly ProviderMeta[] = [
   { id: 'xai', label: 'xAI (Grok)', kind: 'openai_compatible', baseUrl: 'https://api.x.ai/v1', keyPlaceholder: 'xai-...' },
   { id: 'mistral', label: 'Mistral', kind: 'openai_compatible', baseUrl: 'https://api.mistral.ai/v1', keyPlaceholder: 'API key' },
   { id: 'together', label: 'Together AI', kind: 'openai_compatible', baseUrl: 'https://api.together.xyz/v1', keyPlaceholder: 'API key' },
+  {
+    id: 'zai',
+    label: 'Z.ai (GLM)',
+    kind: 'openai_compatible',
+    baseUrl: 'https://api.z.ai/api/paas/v4',
+    keyPlaceholder: 'API key จากคอนโซล z.ai',
+    outputHeadroom: 8192,
+    fallbackModels: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air', 'glm-4.5-flash'],
+  },
   { id: 'custom', label: 'Custom (OpenAI-compatible)', kind: 'openai_compatible', customBaseUrl: true, keyPlaceholder: 'API key ของ endpoint นั้น' },
 ]
 

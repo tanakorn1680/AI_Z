@@ -14,7 +14,7 @@ const registry: Record<string, ProviderAdapter> = {
   google: geminiAdapter,
 }
 for (const p of PROVIDER_LIST) {
-  if (p.kind === 'openai_compatible') registry[p.id] = openaiCompatibleAdapter(p.baseUrl)
+  if (p.kind === 'openai_compatible') registry[p.id] = openaiCompatibleAdapter({ presetBase: p.baseUrl, outputHeadroom: p.outputHeadroom })
 }
 
 export function getAdapter(provider: string): ProviderAdapter {

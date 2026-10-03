@@ -229,6 +229,7 @@ function AddAgentForm({
   const hasKey = keyedProviders.has(provider)
 
   const [models, setModels] = useState<ModelOption[]>([])
+  const [modelsSource, setModelsSource] = useState<'live' | 'static'>('live')
   const [modelsState, setModelsState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [modelsError, setModelsError] = useState('')
 
@@ -244,7 +245,9 @@ function AddAgentForm({
       setModelsError(await readError(res, 'ดึงรายชื่อรุ่นไม่สำเร็จ'))
       return
     }
-    setModels(((await res.json()) as { models: ModelOption[] }).models ?? [])
+    const body = (await res.json()) as { models: ModelOption[]; source?: 'live' | 'static' }
+    setModels(body.models ?? [])
+    setModelsSource(body.source ?? 'live')
     setModelsState('ok')
   }, [provider, baseUrl, meta?.customBaseUrl])
 
@@ -370,10 +373,14 @@ function AddAgentForm({
               ) : (
                 <span className="text-neutral-500">เพิ่ม API key ด้านล่างก่อน แล้วระบบจะดึงรายชื่อรุ่นให้เลือก</span>
               )}
-              {modelsState === 'ok' && <span className="text-neutral-500">พบ {models.length} รุ่น</span>}
+              {modelsState === 'ok' && (
+                <span className="text-neutral-500">
+                  {modelsSource === 'static' ? `รายการสำรอง ${models.length} รุ่น (provider นี้ไม่มีรายชื่อรุ่นให้ดึง — ไม่ยืนยันว่าบัญชีใช้ได้ทุกรุ่น)` : `พบ ${models.length} รุ่น`}
+                </span>
+              )}
               {modelsState === 'error' && <span className="text-red-400">{modelsError}</span>}
             </div>
-            {modelsState === 'ok' && model.trim() !== '' && !models.some((m) => m.id === model.trim()) && (
+            {modelsState === 'ok' && modelsSource === 'live' && model.trim() !== '' && !models.some((m) => m.id === model.trim()) && (
               <p className="mt-1 text-xs text-amber-400">ชื่อนี้ไม่อยู่ในรายการของ key นี้ — ตรวจตัวสะกดอีกครั้ง</p>
             )}
           </div>

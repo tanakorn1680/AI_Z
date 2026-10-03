@@ -32,7 +32,7 @@ create type public.agent_role as enum
 
 create type public.provider_name as enum
   ('anthropic', 'openai', 'google',
-   'openrouter', 'deepseek', 'groq', 'xai', 'mistral', 'together', 'custom');
+   'openrouter', 'deepseek', 'groq', 'xai', 'mistral', 'together', 'zai', 'custom');
 
 create type public.message_role as enum
   ('user', 'assistant', 'system');

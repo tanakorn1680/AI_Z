@@ -10,7 +10,7 @@ import { validateBaseUrl } from './providers'
 
 // รูปแบบ response ของ POST {base}/chat/completions (มาตรฐานที่ OpenRouter/DeepSeek/Groq/xAI/Mistral/Together ใช้ร่วมกัน)
 interface ChatCompletionsResponse {
-  choices?: Array<{ message?: { content?: string | null } }>
+  choices?: Array<{ message?: { content?: string | null }; finish_reason?: string | null }>
   usage?: { prompt_tokens?: number; completion_tokens?: number }
 }
 
@@ -18,7 +18,10 @@ interface ChatCompletionsResponse {
  * Adapter เดียวรองรับทุกค่ายที่ใช้ API แบบ OpenAI
  * presetBase = base URL ของค่ายนั้น ๆ; ถ้าเป็น custom ใช้ req.baseUrl ที่ผู้ใช้กรอกต่อ agent
  */
-export function openaiCompatibleAdapter(presetBase?: string): ProviderAdapter {
+export function openaiCompatibleAdapter(
+  opts: { presetBase?: string; outputHeadroom?: number } = {}
+): ProviderAdapter {
+  const { presetBase, outputHeadroom = 0 } = opts
   return {
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const check = validateBaseUrl(presetBase ?? req.baseUrl)
@@ -32,7 +35,8 @@ export function openaiCompatibleAdapter(presetBase?: string): ProviderAdapter {
         },
         body: JSON.stringify({
           model: req.model,
-          max_tokens: req.maxTokens,
+          // รุ่นที่คิดก่อนตอบ (เช่น GLM) นับ token คิดรวมในเพดานนี้ — เผื่อ headroom (ไม่เกิน 32768)
+          max_tokens: outputHeadroom > 0 ? Math.min(req.maxTokens + outputHeadroom, 32768) : req.maxTokens,
           messages: [
             { role: 'system', content: req.systemPrompt },
             { role: 'user', content: req.userPrompt },
@@ -53,8 +57,15 @@ export function openaiCompatibleAdapter(presetBase?: string): ProviderAdapter {
       }
 
       const data = (await res.json()) as ChatCompletionsResponse
+      const choice = data.choices?.[0]
+      const text = choice?.message?.content ?? ''
+      if (!text) {
+        throw new ProviderError(
+          `provider ไม่ส่งข้อความกลับมา (finish_reason: ${choice?.finish_reason ?? 'ไม่ทราบ'}) — ถ้าเป็นรุ่นที่คิดก่อนตอบ ลองเพิ่ม max tokens`
+        )
+      }
       return {
-        text: data.choices?.[0]?.message?.content ?? '',
+        text,
         tokensIn: data.usage?.prompt_tokens ?? 0,
         tokensOut: data.usage?.completion_tokens ?? 0,
       }
