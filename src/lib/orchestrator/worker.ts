@@ -3,7 +3,7 @@ import { getAdapter } from '../ai/registry'
 import { completeWithRetry } from '../ai/retry'
 import { extractFiles, FILE_WRITE_INSTRUCTION } from '../files/extract'
 import { saveFileVersion } from '../files/save'
-import { InvalidApiKeyError } from '../ai/types'
+import { InvalidApiKeyError, RateLimitError } from '../ai/types'
 import { buildTaskContext } from './context-builder'
 import { calculateCost } from './pricing'
 import { enqueueTask } from './queue'
@@ -15,7 +15,14 @@ interface TaskRow {
   description: string
   depends_on: string[]
   assigned_agent: string | null
+  /** claim_task คืนแถวหลังเพิ่ม attempts แล้ว */
+  attempts?: number
 }
+
+// rate limit: รอแล้วลองใหม่ได้มากกว่า max_attempts ปกติ เพราะไม่ใช่ความผิดของ task
+const RATE_LIMIT_MAX_ATTEMPTS = 6
+// provider บอกให้รอนานกว่านี้ = โควตารายวันหมด ไม่คุ้มรอ ปิดงานพร้อมบอกสาเหตุ
+const RATE_LIMIT_MAX_WAIT_SECONDS = 600
 
 /**
  * ประมวลผล Task เดียวให้จบ: claim → เรียก AI → บันทึกผล → enqueue task ถัดไปที่พร้อม
@@ -144,6 +151,40 @@ async function handleTaskFailure(admin: SupabaseClient, task: TaskRow, err: unkn
     await admin
       .from<TaskRow>('tasks')
       .update({ status: 'failed', error: message, completed_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .eq('status', 'running')
+    await admin.rpc('cancel_blocked_tasks', { p_project_id: task.project_id })
+    return
+  }
+
+  if (err instanceof RateLimitError) {
+    const attempts = task.attempts ?? 1
+    const asked = err.retryAfterSeconds
+    const giveUp = (asked !== undefined && asked > RATE_LIMIT_MAX_WAIT_SECONDS) || attempts >= RATE_LIMIT_MAX_ATTEMPTS
+    if (!giveUp) {
+      // หน่วงตามที่ provider บอก (+2 วินาทีกันเผื่อ) ไม่งั้นรอเพิ่มทีละ 20 วินาที ผ่านคิว ไม่ได้นอนรอใน Worker
+      const wait = Math.min(asked !== undefined ? asked + 2 : 20 * attempts, RATE_LIMIT_MAX_WAIT_SECONDS)
+      const { data: requeued } = await admin
+        .from('tasks')
+        .update({
+          status: 'pending',
+          error: `โควตา AI เต็มชั่วคราว จะลองใหม่อัตโนมัติใน ~${wait} วินาที (ครั้งที่ ${attempts}/${RATE_LIMIT_MAX_ATTEMPTS})\n${message}`.slice(0, 2000),
+        })
+        .eq('id', task.id)
+        .eq('status', 'running')
+        .select('id')
+      if (requeued && (requeued as unknown[]).length > 0) {
+        await enqueueTask({ taskId: task.id, projectId: task.project_id }, { delaySeconds: wait })
+      }
+      return
+    }
+    const finalMessage =
+      asked !== undefined && asked > RATE_LIMIT_MAX_WAIT_SECONDS
+        ? `โควตา AI หมด (provider ให้รอ ~${Math.round(asked / 60)} นาที) — ลองใหม่ภายหลัง หรือเปลี่ยนไปใช้ provider/รุ่นอื่น\n${message}`
+        : message
+    await admin
+      .from('tasks')
+      .update({ status: 'failed', error: finalMessage.slice(0, 2000), completed_at: new Date().toISOString() })
       .eq('id', task.id)
       .eq('status', 'running')
     await admin.rpc('cancel_blocked_tasks', { p_project_id: task.project_id })

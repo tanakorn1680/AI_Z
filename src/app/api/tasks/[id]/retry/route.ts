@@ -22,5 +22,31 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   await enqueueTask({ taskId: data.id, projectId: data.project_id })
 
-  return apiOk({ ok: true })
+  // งานที่ถูก "ยกเลิกอัตโนมัติ" เพราะงานนี้ล้ม (และที่พึ่งพาต่อเป็นทอด ๆ) ให้กลับมา pending ด้วย
+  // ไม่ต้อง enqueue — มันรอ dependency อยู่ และจะถูก enqueue เองเมื่องานนี้เสร็จ (enqueueReadyTasks)
+  // งานที่ผู้ใช้กดยกเลิกเอง (error ไม่ใช่ข้อความอัตโนมัติ) จะไม่ถูกแตะ
+  const { data: cancelled } = await auth.supabase
+    .from('tasks')
+    .select('id, depends_on, error')
+    .eq('project_id', data.project_id)
+    .eq('status', 'cancelled')
+  const candidates = ((cancelled ?? []) as Array<{ id: string; depends_on: string[]; error: string | null }>)
+    .filter((t) => t.error?.startsWith('ยกเลิกอัตโนมัติ'))
+  const revive = new Set<string>([data.id])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const t of candidates) {
+      if (!revive.has(t.id) && t.depends_on.some((d) => revive.has(d))) {
+        revive.add(t.id)
+        grew = true
+      }
+    }
+  }
+  revive.delete(data.id)
+  if (revive.size > 0) {
+    await auth.supabase.from('tasks').update({ status: 'pending' }).in('id', [...revive])
+  }
+
+  return apiOk({ ok: true, revived: revive.size })
 }

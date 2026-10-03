@@ -152,7 +152,11 @@ export default function WorkspaceClient({
                   <span className="font-medium">{t.title}</span>
                   <span className={STATUS_COLOR[t.status]}>{t.status}</span>
                 </div>
-                {t.error && <p className="mt-1 text-xs text-red-400">{t.error}</p>}
+                {t.error && (
+                  <p className={`mt-1 whitespace-pre-wrap break-words text-xs ${t.status === 'pending' || t.status === 'running' ? 'text-amber-400' : 'text-red-400'}`}>
+                    {t.error}
+                  </p>
+                )}
                 <div className="mt-2 flex gap-2">
                   {(t.status === 'failed' || t.status === 'cancelled') && (
                     <button

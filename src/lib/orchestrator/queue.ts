@@ -12,6 +12,11 @@ export interface TaskMessage {
 }
 
 /** เข้าคิวให้ Worker หยิบไปทำ — ห้าม await ผลลัพธ์การทำงานจริงที่นี่ (แค่ enqueue) */
-export async function enqueueTask(msg: TaskMessage): Promise<void> {
-  await send('agent-tasks', msg)
+export async function enqueueTask(msg: TaskMessage, opts: { delaySeconds?: number } = {}): Promise<void> {
+  // delaySeconds ให้คิวหน่วงก่อนส่งให้ Worker (SDK รับได้สูงสุด 7 วัน) ใช้รอโควตา rate limit
+  if (opts.delaySeconds && opts.delaySeconds > 0) {
+    await send('agent-tasks', msg, { delaySeconds: Math.ceil(opts.delaySeconds) })
+  } else {
+    await send('agent-tasks', msg)
+  }
 }

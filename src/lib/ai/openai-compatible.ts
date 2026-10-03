@@ -3,9 +3,9 @@ import {
   type CompletionRequest,
   type CompletionResult,
   InvalidApiKeyError,
-  RateLimitError,
   ProviderError,
 } from './types'
+import { toRateLimitError } from './rate-limit'
 import { validateBaseUrl } from './providers'
 
 // รูปแบบ response ของ POST {base}/chat/completions (มาตรฐานที่ OpenRouter/DeepSeek/Groq/xAI/Mistral/Together ใช้ร่วมกัน)
@@ -50,7 +50,7 @@ export function openaiCompatibleAdapter(
       if (res.status === 401 || res.status === 403) {
         throw new InvalidApiKeyError('API key ไม่ถูกต้องหรือไม่มีสิทธิ์ใช้รุ่นนี้')
       }
-      if (res.status === 429) throw new RateLimitError('rate limit')
+      if (res.status === 429) throw await toRateLimitError(res, 'AI provider')
       if (!res.ok) {
         const body = await res.text().catch(() => '')
         throw new ProviderError(`provider error ${res.status}: ${body.slice(0, 500)}`, res.status)

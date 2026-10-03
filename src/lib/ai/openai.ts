@@ -3,9 +3,9 @@ import {
   type CompletionRequest,
   type CompletionResult,
   InvalidApiKeyError,
-  RateLimitError,
   ProviderError,
 } from './types'
+import { toRateLimitError } from './rate-limit'
 
 // รูปแบบ response ของ POST /v1/chat/completions เท่าที่เราต้องใช้จริง
 interface OpenAIChatResponse {
@@ -32,7 +32,7 @@ export const openaiAdapter: ProviderAdapter = {
     })
 
     if (res.status === 401) throw new InvalidApiKeyError('OpenAI: API key ไม่ถูกต้อง')
-    if (res.status === 429) throw new RateLimitError('OpenAI: rate limit')
+    if (res.status === 429) throw await toRateLimitError(res, 'OpenAI')
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       throw new ProviderError(`OpenAI error ${res.status}: ${body.slice(0, 500)}`, res.status)

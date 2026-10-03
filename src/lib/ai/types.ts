@@ -23,8 +23,15 @@ export interface CompletionResult {
 /** โยนเมื่อ key ผิด/หมดอายุ — Worker ไม่ควร retry (attempts จะไม่มีวันสำเร็จ) */
 export class InvalidApiKeyError extends Error {}
 
-/** โยนเมื่อโดน rate limit — Worker ควร retry ตามรอบปกติ (ผ่าน fail_task) */
-export class RateLimitError extends Error {}
+/**
+ * โยนเมื่อโดน rate limit/โควตาเต็ม — Worker หน่วงเวลาแล้วลองใหม่ผ่านคิว
+ * retryAfterSeconds = เวลาที่ provider บอกให้รอ (ถ้ามี) ใช้ตัดสินว่าควรรอหรือยอมแพ้ (โควตารายวัน)
+ */
+export class RateLimitError extends Error {
+  constructor(message: string, public retryAfterSeconds?: number) {
+    super(message)
+  }
+}
 
 /** โยนเมื่อ provider error อื่น ๆ ที่ไม่ใช่ 2 เคสข้างบน */
 export class ProviderError extends Error {

@@ -3,9 +3,9 @@ import {
   type CompletionRequest,
   type CompletionResult,
   InvalidApiKeyError,
-  RateLimitError,
   ProviderError,
 } from './types'
+import { toRateLimitError } from './rate-limit'
 
 // รูปแบบ response ของ models.generateContent เท่าที่เราต้องใช้จริง
 // (ยืนยันจากเอกสาร ai.google.dev — Gemini แยก systemInstruction ออกจาก contents)
@@ -35,7 +35,7 @@ export const geminiAdapter: ProviderAdapter = {
     if (res.status === 401 || res.status === 403) {
       throw new InvalidApiKeyError('Gemini: API key ไม่ถูกต้องหรือไม่มีสิทธิ์')
     }
-    if (res.status === 429) throw new RateLimitError('Gemini: rate limit')
+    if (res.status === 429) throw await toRateLimitError(res, 'Gemini')
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       throw new ProviderError(`Gemini error ${res.status}: ${body.slice(0, 500)}`, res.status)

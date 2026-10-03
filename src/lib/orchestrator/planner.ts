@@ -48,7 +48,7 @@ export async function planTasksFromInstruction(
     userPrompt: params.instruction,
     maxTokens: 2048,
     baseUrl: params.managerBaseUrl ?? undefined,
-  })
+  }, { rateLimitWaitMaxSeconds: 8 })
 
   // บันทึก token ของการวางแผน (ไม่มี task ผูก) — นับเฉพาะ token ไม่คิดเงิน/ไม่แตะ spent_usd เหมือนพฤติกรรมเดิม
   // ทำก่อน parse เพื่อให้ token นับแม้ Manager ตอบผิดรูปแบบ

@@ -4,7 +4,7 @@ import { apiOk, apiError, parseBody, requireFields } from '@/lib/utils/api'
 import { sanitizeText, isValidUUID } from '@/lib/utils/sanitize'
 import { planTasksFromInstruction } from '@/lib/orchestrator/planner'
 import { enqueueReadyTasks } from '@/lib/orchestrator/worker'
-import { InvalidApiKeyError } from '@/lib/ai/types'
+import { InvalidApiKeyError, RateLimitError } from '@/lib/ai/types'
 
 /**
  * สั่งงานใหม่: บันทึกข้อความผู้ใช้ → ให้ AI Manager แตกเป็น Task → enqueue ตัวที่พร้อมรันทันที
@@ -83,7 +83,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     return apiOk({ taskCount })
   } catch (e) {
-    const message = e instanceof InvalidApiKeyError ? e.message : (e instanceof Error ? e.message : 'เกิดข้อผิดพลาด')
+    let message = e instanceof InvalidApiKeyError ? e.message : (e instanceof Error ? e.message : 'เกิดข้อผิดพลาด')
+    if (e instanceof RateLimitError) {
+      message += e.retryAfterSeconds !== undefined
+        ? ` (รอประมาณ ${e.retryAfterSeconds} วินาทีแล้วส่งคำสั่งใหม่)`
+        : ' (รอสักครู่แล้วส่งคำสั่งใหม่)'
+    }
     await admin.from('messages').insert({
       project_id: projectId,
       role: 'assistant',
