@@ -14,7 +14,7 @@ export class ListModelsError extends Error {
 }
 
 // รุ่นที่ไม่ใช่แชท/ข้อความ — ซ่อนจากรายการเพื่อไม่ให้เลือกผิด
-const NON_CHAT = /(embed|tts|image|imagen|veo|lyria|transcribe|whisper|dall-e|moderation|robotics|computer-use|deep-research|antigravity|aqa|realtime|audio)/i
+const NON_CHAT = /(embed|tts|image|imagen|veo|lyria|transcribe|whisper|dall-e|moderation|robotics|computer-use|deep-research|antigravity|aqa|realtime|audio|orpheus|guard)/i
 
 async function getJson(url: string, headers: Record<string, string>): Promise<unknown> {
   let res: Response

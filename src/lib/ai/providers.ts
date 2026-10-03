@@ -29,7 +29,7 @@ export const PROVIDER_LIST: readonly ProviderMeta[] = [
   { id: 'google', label: 'Google (Gemini)', kind: 'google', keyPlaceholder: 'AIza...' },
   { id: 'openrouter', label: 'OpenRouter', kind: 'openai_compatible', baseUrl: 'https://openrouter.ai/api/v1', keyPlaceholder: 'sk-or-...' },
   { id: 'deepseek', label: 'DeepSeek', kind: 'openai_compatible', baseUrl: 'https://api.deepseek.com', keyPlaceholder: 'sk-...' },
-  { id: 'groq', label: 'Groq', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', keyPlaceholder: 'gsk_...' },
+  { id: 'groq', label: 'Groq', kind: 'openai_compatible', baseUrl: 'https://api.groq.com/openai/v1', keyPlaceholder: 'gsk_...', outputHeadroom: 8192 }, // gpt-oss คิดก่อนตอบ นับ token คิดรวมในเพดาน
   { id: 'xai', label: 'xAI (Grok)', kind: 'openai_compatible', baseUrl: 'https://api.x.ai/v1', keyPlaceholder: 'xai-...' },
   { id: 'mistral', label: 'Mistral', kind: 'openai_compatible', baseUrl: 'https://api.mistral.ai/v1', keyPlaceholder: 'API key' },
   { id: 'together', label: 'Together AI', kind: 'openai_compatible', baseUrl: 'https://api.together.xyz/v1', keyPlaceholder: 'API key' },
