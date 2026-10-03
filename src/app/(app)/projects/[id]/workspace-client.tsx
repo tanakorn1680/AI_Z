@@ -1,18 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import AgentsPanel, { type Agent } from './agents-panel'
 import FilesPanel from './files-panel'
 import UsagePanel from './usage-panel'
+import ChatView, { type Message } from './chat-view'
+import NavDrawer, { type NavItem } from './nav-drawer'
+import { AgentsIcon, ChatIcon, FilesIcon, MenuIcon, TasksIcon, UsageIcon } from './icons'
 
 type Tab = 'chat' | 'agents' | 'tasks' | 'files' | 'usage'
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  created_at: string
-}
 
 interface TaskRow {
   id: string
@@ -33,6 +31,28 @@ const STATUS_COLOR: Record<TaskRow['status'], string> = {
   cancelled: 'text-neutral-600',
 }
 
+const TAB_LABEL: Record<Tab, string> = {
+  chat: 'แชท',
+  agents: 'Agents',
+  tasks: 'Tasks',
+  files: 'ไฟล์',
+  usage: 'การใช้งาน',
+}
+
+function sameMessages(a: Message[], b: Message[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((m, i) => {
+      const o = b[i]
+      return !!o && m.id === o.id && m.content.length === o.content.length
+    })
+  )
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 export default function WorkspaceClient({
   projectId,
   projectName,
@@ -40,172 +60,217 @@ export default function WorkspaceClient({
   projectId: string
   projectName: string
 }) {
+  const router = useRouter()
   const [tab, setTab] = useState<Tab>('chat')
+  const [menuOpen, setMenuOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
-  const [instruction, setInstruction] = useState('')
-  const [sending, setSending] = useState(false)
-  const [sendError, setSendError] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [agentsLoaded, setAgentsLoaded] = useState(false)
+  const [draft, setDraft] = useState('') // เก็บไว้ที่นี่ เพื่อไม่หายเวลาสลับแท็บ
 
   const refresh = useCallback(async () => {
-    const [msgRes, taskRes, agentRes] = await Promise.all([
-      fetch(`/api/projects/${projectId}/messages`),
-      fetch(`/api/projects/${projectId}/tasks`),
-      fetch(`/api/projects/${projectId}/agents`),
-    ])
-    if (msgRes.ok) setMessages((await msgRes.json()).messages)
-    if (taskRes.ok) setTasks((await taskRes.json()).tasks)
-    if (agentRes.ok) setAgents((await agentRes.json()).agents)
+    try {
+      const [msgRes, taskRes, agentRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}/messages`),
+        fetch(`/api/projects/${projectId}/tasks`),
+        fetch(`/api/projects/${projectId}/agents`),
+      ])
+      // อัปเดต state เฉพาะเมื่อข้อมูลเปลี่ยนจริง เพื่อไม่ให้หน้า render ซ้ำทุก 3 วินาที
+      if (msgRes.ok) {
+        const next: Message[] = (await msgRes.json()).messages ?? []
+        setMessages((prev) => (sameMessages(prev, next) ? prev : next))
+      }
+      if (taskRes.ok) {
+        const next: TaskRow[] = (await taskRes.json()).tasks ?? []
+        setTasks((prev) => (sameJson(prev, next) ? prev : next))
+      }
+      if (agentRes.ok) {
+        const next: Agent[] = (await agentRes.json()).agents ?? []
+        setAgents((prev) => (sameJson(prev, next) ? prev : next))
+        setAgentsLoaded(true)
+      }
+    } catch {
+      // เครือข่ายหลุดชั่วคราว — รอรอบถัดไป
+    }
   }, [projectId])
 
+  // polling เฉพาะตอนที่หน้าจออยู่หน้าสุด (ประหยัดแบต/เน็ตบนมือถือ) และดึงใหม่ทันทีเมื่อกลับมา
   useEffect(() => {
-    refresh()
-    const t = setInterval(refresh, POLL_MS)
-    return () => clearInterval(t)
+    let timer: ReturnType<typeof setInterval> | null = null
+    const start = () => {
+      if (timer !== null) return
+      void refresh()
+      timer = setInterval(() => void refresh(), POLL_MS)
+    }
+    const stop = () => {
+      if (timer === null) return
+      clearInterval(timer)
+      timer = null
+    }
+    const onVisibility = () => (document.visibilityState === 'visible' ? start() : stop())
+    onVisibility()
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      stop()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [refresh])
 
+  // กันหน้าเว็บ "ดึงลงเพื่อรีเฟรช" ตอนลากแถบบน (มีผลเฉพาะหน้านี้)
   useEffect(() => {
-    if (tab === 'chat') bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, tab])
-
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault()
-    if (!instruction.trim() || sending) return
-    setSending(true)
-    setSendError('')
-
-    const res = await fetch(`/api/projects/${projectId}/runs`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction }),
-    })
-    const body = await res.json()
-    setSending(false)
-
-    if (!res.ok) {
-      setSendError(body.error ?? 'สั่งงานไม่สำเร็จ')
-      return
+    const el = document.documentElement
+    const prev = el.style.overscrollBehaviorY
+    el.style.overscrollBehaviorY = 'none'
+    return () => {
+      el.style.overscrollBehaviorY = prev
     }
-    setInstruction('')
-    refresh()
+  }, [])
+
+  const running = tasks.filter((t) => t.status === 'running').length
+  const pending = tasks.filter((t) => t.status === 'pending').length
+  const activeCount = running + pending
+  const hasManager = agentsLoaded ? agents.some((a) => a.role === 'manager') : null
+
+  const navItems: NavItem[] = useMemo(
+    () => [
+      { id: 'chat', label: TAB_LABEL.chat, icon: <ChatIcon /> },
+      { id: 'agents', label: TAB_LABEL.agents, icon: <AgentsIcon /> },
+      { id: 'tasks', label: TAB_LABEL.tasks, icon: <TasksIcon />, badge: activeCount || undefined },
+      { id: 'files', label: TAB_LABEL.files, icon: <FilesIcon /> },
+      { id: 'usage', label: TAB_LABEL.usage, icon: <UsageIcon /> },
+    ],
+    [activeCount],
+  )
+
+  const closeMenu = useCallback(() => setMenuOpen(false), [])
+
+  function selectTab(id: string) {
+    setTab(id as Tab)
+    setMenuOpen(false)
+  }
+
+  async function handleSignOut() {
+    await createClient().auth.signOut()
+    router.replace('/login')
+    router.refresh()
   }
 
   async function handleRetry(taskId: string) {
     await fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' })
-    refresh()
+    void refresh()
   }
 
   async function handleCancel(taskId: string) {
     await fetch(`/api/tasks/${taskId}/cancel`, { method: 'POST' })
-    refresh()
+    void refresh()
   }
 
   return (
-    <div className="mx-auto flex h-screen max-w-4xl flex-col">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <h1 className="font-medium">{projectName}</h1>
-        <nav className="flex gap-1 text-sm">
-          {(['chat', 'agents', 'tasks', 'files', 'usage'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`rounded-md px-3 py-1.5 capitalize transition ${
-                tab === t ? 'bg-indigo-600 text-white' : 'text-neutral-400 hover:bg-neutral-800'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
+    // fixed inset-0 = กรอบเท่าหน้าจอที่เห็นจริงพอดี แถบบนจึงไม่เลื่อนหนีไปไหน
+    <div className="fixed inset-0 flex flex-col bg-neutral-950 text-neutral-100">
+      <header
+        className="shrink-0 border-b border-neutral-800 bg-neutral-950"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      >
+        <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-3 px-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-[15px] font-semibold leading-5">{projectName}</h1>
+            <p className="truncate text-xs leading-4 text-neutral-500">{TAB_LABEL[tab]}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="เปิดเมนู"
+            aria-expanded={menuOpen}
+            className="relative -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-300 active:bg-neutral-800"
+          >
+            <MenuIcon />
+            {activeCount > 0 && (
+              <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-indigo-500" />
+            )}
+          </button>
+        </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto p-4">
-        {tab === 'chat' && (
-          <div className="space-y-3">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`max-w-[80%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${
-                  m.role === 'user'
-                    ? 'ml-auto bg-indigo-600 text-white'
-                    : 'bg-neutral-900 text-neutral-200'
-                }`}
-              >
-                {m.content}
+      {tab === 'chat' ? (
+        <ChatView
+          projectId={projectId}
+          messages={messages}
+          running={running}
+          pending={pending}
+          hasManager={hasManager}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSent={() => void refresh()}
+          onOpenAgents={() => setTab('agents')}
+          onOpenTasks={() => setTab('tasks')}
+        />
+      ) : (
+        <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div
+            className="mx-auto w-full max-w-3xl p-4"
+            style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+          >
+            {tab === 'agents' && <AgentsPanel projectId={projectId} agents={agents} onChanged={refresh} />}
+
+            {tab === 'tasks' && (
+              <div className="space-y-2">
+                {tasks.map((t) => (
+                  <div key={t.id} className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-medium">{t.title}</span>
+                      <span className={`shrink-0 ${STATUS_COLOR[t.status]}`}>{t.status}</span>
+                    </div>
+                    {t.error && (
+                      <p
+                        className={`mt-1 whitespace-pre-wrap break-words text-xs ${
+                          t.status === 'pending' || t.status === 'running' ? 'text-amber-400' : 'text-red-400'
+                        }`}
+                      >
+                        {t.error}
+                      </p>
+                    )}
+                    <div className="mt-2 flex gap-2">
+                      {(t.status === 'failed' || t.status === 'cancelled') && (
+                        <button
+                          onClick={() => handleRetry(t.id)}
+                          className="py-1 text-xs text-indigo-400 hover:underline"
+                        >
+                          ลองใหม่
+                        </button>
+                      )}
+                      {(t.status === 'pending' || t.status === 'running') && (
+                        <button
+                          onClick={() => handleCancel(t.id)}
+                          className="py-1 text-xs text-neutral-500 hover:underline"
+                        >
+                          ยกเลิก
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {tasks.length === 0 && <p className="text-sm text-neutral-500">ยังไม่มี Task</p>}
               </div>
-            ))}
-            <div ref={bottomRef} />
+            )}
+
+            {tab === 'files' && <FilesPanel projectId={projectId} />}
+
+            {tab === 'usage' && <UsagePanel projectId={projectId} />}
           </div>
-        )}
-
-        {tab === 'agents' && (
-          <AgentsPanel projectId={projectId} agents={agents} onChanged={refresh} />
-        )}
-
-        {tab === 'tasks' && (
-          <div className="space-y-2">
-            {tasks.map((t) => (
-              <div key={t.id} className="rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{t.title}</span>
-                  <span className={STATUS_COLOR[t.status]}>{t.status}</span>
-                </div>
-                {t.error && (
-                  <p className={`mt-1 whitespace-pre-wrap break-words text-xs ${t.status === 'pending' || t.status === 'running' ? 'text-amber-400' : 'text-red-400'}`}>
-                    {t.error}
-                  </p>
-                )}
-                <div className="mt-2 flex gap-2">
-                  {(t.status === 'failed' || t.status === 'cancelled') && (
-                    <button
-                      onClick={() => handleRetry(t.id)}
-                      className="text-xs text-indigo-400 hover:underline"
-                    >
-                      ลองใหม่
-                    </button>
-                  )}
-                  {(t.status === 'pending' || t.status === 'running') && (
-                    <button
-                      onClick={() => handleCancel(t.id)}
-                      className="text-xs text-neutral-500 hover:underline"
-                    >
-                      ยกเลิก
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {tasks.length === 0 && <p className="text-sm text-neutral-500">ยังไม่มี Task</p>}
-          </div>
-        )}
-
-        {tab === 'files' && <FilesPanel projectId={projectId} />}
-
-        {tab === 'usage' && <UsagePanel projectId={projectId} />}
-      </main>
-
-      {tab === 'chat' && (
-        <form onSubmit={handleSend} className="border-t border-neutral-800 p-4">
-          {sendError && <p className="mb-2 text-sm text-red-400">{sendError}</p>}
-          <div className="flex gap-2">
-            <input
-              value={instruction}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setInstruction(e.target.value)}
-              placeholder="สั่งงานทีม AI ของคุณ..."
-              className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              disabled={sending}
-              className="rounded-md bg-indigo-600 px-4 py-2 font-medium hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {sending ? 'กำลังส่ง...' : 'ส่ง'}
-            </button>
-          </div>
-        </form>
+        </main>
       )}
+
+      <NavDrawer
+        open={menuOpen}
+        onClose={closeMenu}
+        items={navItems}
+        activeId={tab}
+        onSelect={selectTab}
+        projectName={projectName}
+        onSignOut={handleSignOut}
+      />
     </div>
   )
 }
