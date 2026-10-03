@@ -24,6 +24,12 @@ export interface CompletionResult {
 export class InvalidApiKeyError extends Error {}
 
 /**
+ * โยนเมื่อเครดิต/ยอดเงินในบัญชี provider หมด — บาง provider ส่งมาเป็น HTTP 429 หน้าตาเหมือน rate limit
+ * แต่รอเท่าไรก็ไม่หาย (ต้องเติมเงินหรือเปลี่ยน provider) Worker จึงไม่ retry
+ */
+export class InsufficientCreditError extends Error {}
+
+/**
  * โยนเมื่อโดน rate limit/โควตาเต็ม — Worker หน่วงเวลาแล้วลองใหม่ผ่านคิว
  * retryAfterSeconds = เวลาที่ provider บอกให้รอ (ถ้ามี) ใช้ตัดสินว่าควรรอหรือยอมแพ้ (โควตารายวัน)
  */

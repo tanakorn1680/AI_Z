@@ -3,7 +3,7 @@ import { getAdapter } from '../ai/registry'
 import { completeWithRetry } from '../ai/retry'
 import { extractFiles, FILE_WRITE_INSTRUCTION } from '../files/extract'
 import { saveFileVersion } from '../files/save'
-import { InvalidApiKeyError, RateLimitError } from '../ai/types'
+import { InvalidApiKeyError, InsufficientCreditError, RateLimitError } from '../ai/types'
 import { buildTaskContext } from './context-builder'
 import { calculateCost } from './pricing'
 import { enqueueTask } from './queue'
@@ -146,8 +146,8 @@ async function handleTaskFailure(admin: SupabaseClient, task: TaskRow, err: unkn
   const message = err instanceof Error ? err.message : String(err)
   console.error(`[worker] task ${task.id} ล้มเหลว:`, message)
 
-  // key ผิด: retry ไม่มีทางสำเร็จ ปิดเป็น failed ทันทีโดยไม่กินโควตา attempts เพิ่ม
-  if (err instanceof InvalidApiKeyError) {
+  // key ผิด หรือเครดิตหมด: retry ไม่มีทางสำเร็จ ปิดเป็น failed ทันทีโดยไม่กินโควตา attempts เพิ่ม
+  if (err instanceof InvalidApiKeyError || err instanceof InsufficientCreditError) {
     await admin
       .from<TaskRow>('tasks')
       .update({ status: 'failed', error: message, completed_at: new Date().toISOString() })
