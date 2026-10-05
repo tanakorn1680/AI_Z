@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import ZipImport from './zip-import'
 
 interface FileItem {
   id: string
@@ -21,7 +22,7 @@ interface FileDetail {
   versions: VersionItem[]
 }
 
-type View = { kind: 'list' } | { kind: 'new' } | { kind: 'file'; id: string }
+type View = { kind: 'list' } | { kind: 'new' } | { kind: 'import'; file: File } | { kind: 'file'; id: string }
 
 const inputCls =
   'w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-indigo-500'
@@ -44,6 +45,7 @@ const FileIcon = () => <Icon><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a
 const CopyIcon = () => <Icon><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></Icon>
 const DownloadIcon = () => <Icon><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></Icon>
 const EditIcon = () => <Icon><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></Icon>
+const UploadIcon = () => <Icon><path d="M12 16V4M7 9l5-5 5 5M5 20h14" /></Icon>
 const TrashIcon = () => <Icon><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></Icon>
 
 function formatTime(iso: string): string {
@@ -73,6 +75,9 @@ export default function FilesPanel({ projectId }: { projectId: string }) {
       />
     )
   }
+  if (view.kind === 'import') {
+    return <ZipImport projectId={projectId} file={view.file} onClose={() => setView({ kind: 'list' })} />
+  }
   if (view.kind === 'file') {
     return (
       <FileViewer
@@ -83,17 +88,26 @@ export default function FilesPanel({ projectId }: { projectId: string }) {
       />
     )
   }
-  return <FileList projectId={projectId} onOpen={(id) => setView({ kind: 'file', id })} onNew={() => setView({ kind: 'new' })} />
+  return (
+    <FileList
+      projectId={projectId}
+      onOpen={(id) => setView({ kind: 'file', id })}
+      onNew={() => setView({ kind: 'new' })}
+      onImport={(file) => setView({ kind: 'import', file })}
+    />
+  )
 }
 
 function FileList({
   projectId,
   onOpen,
   onNew,
+  onImport,
 }: {
   projectId: string
   onOpen: (id: string) => void
   onNew: () => void
+  onImport: (file: File) => void
 }) {
   const [files, setFiles] = useState<FileItem[] | null>(null)
   const [error, setError] = useState('')
@@ -117,12 +131,28 @@ function FileList({
 
   return (
     <section>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-neutral-300">Files{files ? ` (${files.length})` : ''}</h2>
-        <button onClick={onNew} className={primaryBtn}>
-          <PlusIcon />
-          ไฟล์ใหม่
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-neutral-700 px-3 py-2 text-sm text-neutral-200 transition hover:bg-neutral-800 focus-within:border-indigo-500">
+            <UploadIcon />
+            อัปโหลด zip
+            <input
+              type="file"
+              accept=".zip,application/zip,application/x-zip-compressed"
+              className="sr-only"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                const picked = e.target.files?.[0]
+                e.target.value = '' // เลือกไฟล์เดิมซ้ำได้อีก
+                if (picked) onImport(picked)
+              }}
+            />
+          </label>
+          <button onClick={onNew} className={primaryBtn}>
+            <PlusIcon />
+            ไฟล์ใหม่
+          </button>
+        </div>
       </div>
       {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
       <div className="space-y-2">
@@ -143,7 +173,7 @@ function FileList({
         ))}
         {files && files.length === 0 && (
           <p className="text-sm text-neutral-500">
-            ยังไม่มีไฟล์ — agent ที่เปิดสิทธิ์ &quot;สร้าง/แก้ไฟล์ได้&quot; จะบันทึกไฟล์ที่ทำเสร็จไว้ที่นี่ หรือกด &quot;ไฟล์ใหม่&quot; เพื่อสร้างเอง
+            ยังไม่มีไฟล์ — agent ที่เปิดสิทธิ์ &quot;สร้าง/แก้ไฟล์ได้&quot; จะบันทึกไฟล์ที่ทำเสร็จไว้ที่นี่ กด &quot;ไฟล์ใหม่&quot; เพื่อสร้างเอง หรือ &quot;อัปโหลด zip&quot; เพื่อนำเข้าทั้งโปรเจกต์
           </p>
         )}
         {!files && !error && <p className="text-sm text-neutral-500">กำลังโหลด...</p>}
