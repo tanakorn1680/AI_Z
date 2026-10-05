@@ -1,5 +1,9 @@
 export const MAX_FILE_CHARS = 500_000
 
+/** นำเข้าหลายไฟล์ (เช่น จาก zip) ส่งเป็นชุด ชุดละไม่เกินนี้ — ต้องเล็กกว่าเพดาน request body 4.5 MB ของ Vercel */
+export const IMPORT_BATCH_MAX_FILES = 25
+export const IMPORT_BATCH_MAX_CHARS = 900_000
+
 export type PathCheck = { ok: true; path: string } | { ok: false; error: string }
 
 /**
