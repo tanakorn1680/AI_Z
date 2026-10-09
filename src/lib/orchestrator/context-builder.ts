@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export async function buildTaskContext(
   admin: SupabaseClient,
   task: { id: string; project_id: string; title: string; description: string; depends_on: string[] },
-  opts: { includeFiles?: boolean } = {}
+  opts: { includeFiles?: boolean; /** path ของไฟล์ที่ต้องส่งเนื้อหา (ที่เหลือส่งแค่ชื่อ) */ files?: string[] } = {}
 ): Promise<string> {
   const { data: project } = await admin
     .from<{ instructions: string }>('projects')
@@ -35,7 +35,7 @@ export async function buildTaskContext(
       .join('\n\n')
   }
 
-  const filesSection = opts.includeFiles ? await buildFilesContext(admin, task.project_id) : ''
+  const filesSection = opts.includeFiles ? await buildFilesContext(admin, task.project_id, opts.files ?? []) : ''
 
   const parts = [
     project?.instructions ? `## คำสั่งของโปรเจกต์\n${project.instructions}` : '',
@@ -47,14 +47,13 @@ export async function buildTaskContext(
   return parts.join('\n\n')
 }
 
-// เพดานของเนื้อหาไฟล์ที่ส่งเข้า prompt — คุม token (โดยเฉพาะบน free tier) ไม่ส่งทุกไฟล์เต็ม ๆ
-const MAX_FILES_LISTED = 50
-const MAX_FILES_WITH_CONTENT = 10
+// เพดานของเนื้อหาไฟล์ที่ส่งเข้า prompt — คุม token (โดยเฉพาะบน free tier)
+// ส่งเนื้อหาเฉพาะไฟล์ที่แผนระบุว่างานนี้ต้องใช้ ส่วนไฟล์อื่นส่งแค่ชื่อให้รู้ว่ามีอะไรอยู่
+const MAX_FILES_LISTED = 30
 const MAX_CHARS_PER_FILE = 6_000
 const MAX_CHARS_TOTAL = 12_000
 
-/** รายชื่อไฟล์ทั้งหมดของ project + เนื้อหาของไฟล์ที่แก้ล่าสุด (ภายใต้เพดานด้านบน) */
-async function buildFilesContext(admin: SupabaseClient, projectId: string): Promise<string> {
+async function buildFilesContext(admin: SupabaseClient, projectId: string, wanted: string[]): Promise<string> {
   const { data: fileRows } = await admin
     .from('files')
     .select('id, path, current_version_id, created_at')
@@ -62,24 +61,38 @@ async function buildFilesContext(admin: SupabaseClient, projectId: string): Prom
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(MAX_FILES_LISTED)
-  const files = (fileRows ?? []) as Array<{ id: string; path: string; current_version_id: string | null }>
-  if (files.length === 0) return ''
+  const listed = (fileRows ?? []) as Array<{ id: string; path: string; current_version_id: string | null }>
 
-  const withContent = files.filter((f) => f.current_version_id).slice(0, MAX_FILES_WITH_CONTENT)
+  // ไฟล์ที่ต้องอ่านเนื้อหา — ค้นตาม path ตรง ๆ (อาจเก่ากว่า 30 ไฟล์ล่าสุดที่แสดงชื่อ)
+  const wantedRows = (
+    await Promise.all(
+      [...new Set(wanted)].slice(0, 8).map(async (path) => {
+        const { data } = await admin
+          .from('files')
+          .select('id, path, current_version_id')
+          .eq('project_id', projectId)
+          .eq('path', path)
+          .is('deleted_at', null)
+          .maybeSingle()
+        return data as { id: string; path: string; current_version_id: string | null } | null
+      })
+    )
+  ).filter((r): r is { id: string; path: string; current_version_id: string | null } => !!r && !!r.current_version_id)
+
+  if (listed.length === 0 && wantedRows.length === 0) return ''
+
   const contentByVersion = new Map<string, string>()
-  if (withContent.length > 0) {
+  if (wantedRows.length > 0) {
     const { data: versionRows } = await admin
       .from('file_versions')
       .select('id, content')
-      .in('id', withContent.map((f) => f.current_version_id as string))
-    for (const v of (versionRows ?? []) as Array<{ id: string; content: string }>) {
-      contentByVersion.set(v.id, v.content)
-    }
+      .in('id', wantedRows.map((f) => f.current_version_id as string))
+    for (const v of (versionRows ?? []) as Array<{ id: string; content: string }>) contentByVersion.set(v.id, v.content)
   }
 
   let budget = MAX_CHARS_TOTAL
   const blocks: string[] = []
-  for (const f of withContent) {
+  for (const f of wantedRows) {
     if (budget <= 0) break
     const full = contentByVersion.get(f.current_version_id as string) ?? ''
     const take = Math.min(full.length, MAX_CHARS_PER_FILE, budget)
@@ -89,8 +102,8 @@ async function buildFilesContext(admin: SupabaseClient, projectId: string): Prom
   }
 
   return [
-    `## ไฟล์ในโปรเจกต์ (${files.length} ไฟล์)\n${files.map((f) => `- ${f.path}`).join('\n')}`,
-    blocks.length ? `## เนื้อหาไฟล์ล่าสุด\n${blocks.join('\n\n')}` : '',
+    listed.length ? `## ไฟล์ในโปรเจกต์ (ชื่อเท่านั้น)\n${listed.map((f) => `- ${f.path}`).join('\n')}` : '',
+    blocks.length ? `## เนื้อหาไฟล์ที่งานนี้ต้องใช้\n${blocks.join('\n\n')}` : '',
   ]
     .filter(Boolean)
     .join('\n\n')

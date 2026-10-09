@@ -1,9 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getAdapter } from '../ai/registry'
 import { completeWithRetry } from '../ai/retry'
-import { extractFiles, FILE_WRITE_INSTRUCTION } from '../files/extract'
+import { extractFiles } from '../files/extract'
 import { saveFileVersion } from '../files/save'
 import { InvalidApiKeyError, InsufficientCreditError, RateLimitError } from '../ai/types'
+import { resolveAgentKey } from '../ai/agent-key'
+import { composeWorkerPrompt } from './lead-plan'
 import { buildTaskContext } from './context-builder'
 import { calculateCost } from './pricing'
 import { enqueueTask } from './queue'
@@ -15,6 +17,8 @@ interface TaskRow {
   description: string
   depends_on: string[]
   assigned_agent: string | null
+  /** แผนงานใส่ไฟล์ที่งานนี้ต้องอ่านไว้ที่นี่ ({ files: [...] }) */
+  input?: { files?: unknown } | null
   /** claim_task คืนแถวหลังเพิ่ม attempts แล้ว */
   attempts?: number
 }
@@ -42,13 +46,13 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       throw new Error('Task นี้ไม่มี agent ผูกอยู่ — ผู้ใช้ต้องเลือก agent ก่อน')
     }
 
-    interface AgentRow { provider: string; model: string; system_prompt: string; max_tokens: number | null; base_url: string | null; allowed_tools: string[] | null }
-    const { data: agent, error: agentError } = await admin
-      .from<AgentRow>('agents')
-      .select('provider, model, system_prompt, max_tokens, base_url, allowed_tools')
-      .eq('id', task.assigned_agent)
-      .single()
-    if (agentError || !agent) throw new Error('หา agent ที่ผูกกับ task นี้ไม่เจอ')
+    interface AgentRow { id: string; name: string; duty?: string | null; provider: string; model: string; system_prompt: string; max_tokens: number | null; base_url: string | null; allowed_tools: string[] | null }
+    // duty มาจาก migration 0004 — ถ้ายังไม่ได้รัน ให้ทำงานต่อได้ด้วยคอลัมน์เดิม
+    const agentCols = 'id, name, provider, model, system_prompt, max_tokens, base_url, allowed_tools'
+    let agentRes = await admin.from('agents').select(`${agentCols}, duty`).eq('id', task.assigned_agent).single()
+    if (agentRes.error) agentRes = await admin.from('agents').select(agentCols).eq('id', task.assigned_agent).single()
+    const agent = agentRes.data as unknown as AgentRow | null
+    if (agentRes.error || !agent) throw new Error('หา agent ที่ผูกกับ task นี้ไม่เจอ')
 
     interface ProjectRow { owner_id: string; max_tokens_per_task: number }
     const { data: project, error: projectError } = await admin
@@ -58,25 +62,30 @@ export async function processTask(admin: SupabaseClient, taskId: string): Promis
       .single()
     if (projectError || !project) throw new Error('หา project ของ task นี้ไม่เจอ')
 
-    const { data: apiKey, error: keyError } = await admin.rpc<string>('get_api_key', {
-      p_user_id: project.owner_id,
-      p_provider: agent.provider,
-    })
-    if (keyError || !apiKey) {
-      throw new InvalidApiKeyError(`ผู้ใช้ยังไม่ได้เพิ่ม API key ของ ${agent.provider}`)
+    const apiKey = await resolveAgentKey(admin, agent, project.owner_id)
+    if (!apiKey) {
+      throw new InvalidApiKeyError(`${agent.name} ยังไม่มี API key — เพิ่มที่แท็บ Agents`)
     }
 
     // สิทธิ์ของ agent บังคับที่ฝั่ง Backend นี้เท่านั้น (allowed_tools ใน DB) ไม่เชื่อสิ่งที่โมเดลบอกเอง
     const canReadFiles = agent.allowed_tools?.includes('read_file') ?? false
     const canWriteFiles = agent.allowed_tools?.includes('write_file') ?? false
 
-    const contextPrompt = await buildTaskContext(admin, task, { includeFiles: canReadFiles })
+    // อ่านเนื้อหาไฟล์เฉพาะที่แผนระบุว่างานนี้ต้องใช้ (คุม token) ส่วนที่เหลือเห็นแค่ชื่อ
+    const rawFiles = task.input?.files
+    const wantedFiles = Array.isArray(rawFiles) ? rawFiles.filter((f): f is string => typeof f === 'string') : []
+    const contextPrompt = await buildTaskContext(admin, task, { includeFiles: canReadFiles, files: wantedFiles })
     const adapter = getAdapter(agent.provider)
 
     const result = await completeWithRetry(adapter, {
       apiKey,
       model: agent.model,
-      systemPrompt: canWriteFiles ? agent.system_prompt + FILE_WRITE_INSTRUCTION : agent.system_prompt,
+      systemPrompt: composeWorkerPrompt({
+        name: agent.name,
+        duty: agent.duty ?? '',
+        systemPrompt: agent.system_prompt,
+        canWriteFiles,
+      }),
       userPrompt: contextPrompt,
       maxTokens: agent.max_tokens ?? project?.max_tokens_per_task ?? 4096,
       baseUrl: agent.base_url ?? undefined,
