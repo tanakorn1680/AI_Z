@@ -11,11 +11,23 @@ import {
 } from 'react'
 import { ArrowDownIcon, CloseIcon, SendIcon, Spinner } from './icons'
 
+export interface PlanTaskView {
+  title: string
+  description?: string
+  /** ชื่อ AI ที่รับงาน */
+  agent: string
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at: string
+  /** มีค่า = ข้อความนี้คือผลงานของ task (แสดงเป็นการ์ดผลงาน) */
+  task_id?: string | null
+  /** แผนงานที่หัวหน้าทีมเสนอ รอผู้ใช้กดยืนยัน */
+  plan?: { tasks: PlanTaskView[] } | null
+  plan_status?: 'pending' | 'started' | 'dismissed' | null
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +107,142 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   )
 }
 
-function MessageBubble({ m, showLabel }: { m: Message; showLabel: boolean }) {
+/** แผนงานที่หัวหน้าทีมเสนอ — เริ่มงานจริงต่อเมื่อผู้ใช้กดยืนยันเท่านั้น */
+function PlanCard({ m, projectId, onChanged }: { m: Message; projectId: string; onChanged: () => void }) {
+  const [busy, setBusy] = useState<'start' | 'dismiss' | null>(null)
+  const [error, setError] = useState('')
+  const tasks = m.plan?.tasks ?? []
+
+  async function act(action: 'start' | 'dismiss') {
+    setBusy(action)
+    setError('')
+    try {
+      const res = await fetch(`/api/projects/${projectId}/plans/${m.id}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: unknown }
+        setError(typeof body.error === 'string' ? body.error : 'ทำรายการไม่สำเร็จ')
+      }
+    } catch {
+      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ลองใหม่อีกครั้ง')
+    } finally {
+      setBusy(null)
+      onChanged()
+    }
+  }
+
+  return (
+    <div className="mt-2 w-full max-w-[92%] rounded-2xl border border-neutral-800 bg-neutral-900/60 p-3.5">
+      <p className="text-xs font-medium text-neutral-400">แผนงาน · {tasks.length} งาน</p>
+      <ol className="mt-2 space-y-1.5 text-sm text-neutral-200">
+        {tasks.map((t, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="shrink-0 text-neutral-500">{i + 1}.</span>
+            <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+              {t.title}
+              <span className="ml-1.5 text-xs text-neutral-500">· {t.agent}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {tasks.some((t) => t.description) && (
+        <details className="mt-2 text-xs text-neutral-400">
+          <summary className="cursor-pointer py-1.5">ดูรายละเอียดแต่ละงาน</summary>
+          <ul className="mt-1 space-y-2">
+            {tasks.map((t, i) => (
+              <li key={i} className="[overflow-wrap:anywhere]">
+                <span className="font-medium text-neutral-300">{t.title}:</span> {t.description}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {m.plan_status === 'pending' ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void act('start')}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white active:bg-indigo-500 disabled:opacity-60"
+          >
+            {busy === 'start' && <Spinner size={14} />}
+            เริ่มทำตามแผน
+          </button>
+          <button
+            type="button"
+            disabled={busy !== null}
+            onClick={() => void act('dismiss')}
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-neutral-700 px-4 text-sm text-neutral-300 active:bg-neutral-800 disabled:opacity-60"
+          >
+            ไม่เอาแผนนี้
+          </button>
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-neutral-500">
+          {m.plan_status === 'started' ? 'เริ่มทำงานตามแผนนี้แล้ว' : 'ยกเลิกแผนนี้แล้ว'}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-red-400 [overflow-wrap:anywhere]">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** ผลงานของ task — บรรทัดแรกคือชื่องาน ที่เหลือพับเก็บถ้ายาว เพื่อไม่ให้แชทยาวเกินไป */
+const RESULT_PREVIEW_CHARS = 500
+
+function ResultCard({ m }: { m: Message }) {
+  const [open, setOpen] = useState(false)
+  const nl = m.content.indexOf('\n')
+  const title = nl === -1 ? m.content : m.content.slice(0, nl)
+  const body = nl === -1 ? '' : m.content.slice(nl + 1).trim()
+  const long = body.length > RESULT_PREVIEW_CHARS
+  const shown = open || !long ? body : `${body.slice(0, RESULT_PREVIEW_CHARS)}…`
+  const parts = splitContent(shown)
+
+  return (
+    <div className="w-full max-w-[92%] rounded-2xl border border-neutral-800 bg-neutral-900 px-4 py-3 text-[15px] leading-relaxed text-neutral-100 [overflow-wrap:anywhere]">
+      <p className="text-xs font-medium text-neutral-400">ผลงาน</p>
+      <p className="mt-0.5 font-medium">{title}</p>
+      {parts.map((p, i) =>
+        p.kind === 'code' ? (
+          <CodeBlock key={i} code={p.text} lang={p.lang} />
+        ) : (
+          <p key={i} className="mt-1.5 whitespace-pre-wrap text-neutral-200">
+            {p.text}
+          </p>
+        ),
+      )}
+      {long && (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="mt-2 rounded px-1 py-1.5 text-sm font-medium text-indigo-400 active:bg-neutral-800"
+        >
+          {open ? 'พับเก็บ' : 'ดูทั้งหมด'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MessageBubble({
+  m,
+  showLabel,
+  projectId,
+  onChanged,
+}: {
+  m: Message
+  showLabel: boolean
+  projectId: string
+  onChanged: () => void
+}) {
   if (m.role === 'system') {
     return (
       <p className="mx-auto max-w-[90%] text-center text-xs text-neutral-500 [overflow-wrap:anywhere]">
@@ -110,6 +257,15 @@ function MessageBubble({ m, showLabel }: { m: Message; showLabel: boolean }) {
         <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-indigo-600 px-4 py-2.5 text-[15px] leading-relaxed text-white [overflow-wrap:anywhere]">
           {m.content}
         </div>
+      </div>
+    )
+  }
+
+  if (m.task_id) {
+    return (
+      <div className="flex flex-col items-start">
+        {showLabel && <span className="mb-1 ml-1 text-xs text-neutral-500">ทีม AI</span>}
+        <ResultCard m={m} />
       </div>
     )
   }
@@ -130,6 +286,7 @@ function MessageBubble({ m, showLabel }: { m: Message; showLabel: boolean }) {
           ),
         )}
       </div>
+      {m.plan && m.plan_status && <PlanCard m={m} projectId={projectId} onChanged={onChanged} />}
     </div>
   )
 }
@@ -143,7 +300,7 @@ export default function ChatView({
   messages,
   running,
   pending,
-  hasManager,
+  hasAgents,
   draft,
   onDraftChange,
   onSent,
@@ -155,7 +312,7 @@ export default function ChatView({
   running: number
   pending: number
   /** null = ยังโหลดรายชื่อ Agent ไม่เสร็จ */
-  hasManager: boolean | null
+  hasAgents: boolean | null
   draft: string
   onDraftChange: (v: string) => void
   /** เรียกให้ดึงข้อมูลใหม่ทันทีหลังส่งคำสั่ง */
@@ -246,15 +403,15 @@ export default function ChatView({
     const early = window.setTimeout(onSent, 1000) // ให้ข้อความของเราโผล่เร็วขึ้น
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/runs`, {
+      const res = await fetch(`/api/projects/${projectId}/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instruction: text }),
+        body: JSON.stringify({ message: text }),
       })
       const body = await res.json().catch(() => ({}) as { error?: unknown })
       if (!res.ok) {
         onDraftChange(text)
-        setError(typeof body.error === 'string' ? body.error : 'สั่งงานไม่สำเร็จ')
+        setError(typeof body.error === 'string' ? body.error : 'ส่งข้อความไม่สำเร็จ')
         return
       }
     } catch {
@@ -284,7 +441,7 @@ export default function ChatView({
 
   const busy = sending || running + pending > 0
   const busyLabel = sending
-    ? 'Manager กำลังวางแผนงาน'
+    ? 'หัวหน้าทีมกำลังพิมพ์'
     : running > 0
       ? `กำลังทำงาน ${running} งาน${pending > 0 ? ` · รอคิว ${pending}` : ''}`
       : `รอคิว ${pending} งาน`
@@ -315,9 +472,9 @@ export default function ChatView({
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 py-4">
             {messages.length === 0 ? (
               <div className="my-auto px-4 py-10 text-center">
-                <p className="text-lg font-medium text-neutral-100">เริ่มสั่งงานทีม AI</p>
+                <p className="text-lg font-medium text-neutral-100">คุยกับทีม AI ได้เลย</p>
                 <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-neutral-500">
-                  พิมพ์งานที่ต้องการด้านล่าง Manager จะวางแผนและแบ่งงานให้ Agent ในทีม
+                  เล่าสิ่งที่อยากทำ หัวหน้าทีมจะถามเพิ่มถ้าต้องการ แล้วเสนอแผนให้คุณกดยืนยันก่อนเริ่มลงมือ
                 </p>
               </div>
             ) : (
@@ -334,7 +491,7 @@ export default function ChatView({
                         </p>
                       )}
                       <div className={showTime || i === 0 ? '' : grouped ? 'mt-1.5' : 'mt-4'}>
-                        <MessageBubble m={m} showLabel={!grouped} />
+                        <MessageBubble m={m} showLabel={!grouped} projectId={projectId} onChanged={onSent} />
                       </div>
                     </Fragment>
                   )
@@ -378,17 +535,17 @@ export default function ChatView({
         </div>
       )}
 
-      {/* ยังไม่มี Manager */}
-      {hasManager === false && (
+      {/* ยังไม่มี AI ในทีม */}
+      {hasAgents === false && (
         <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/60 px-4 py-2.5">
           <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 text-sm">
-            <span className="text-neutral-300">ต้องมี Agent ที่เป็น Manager ก่อนจึงจะสั่งงานได้</span>
+            <span className="text-neutral-300">ยังไม่มี AI ในทีม — แค่วาง API key แล้วเลือกโมเดล</span>
             <button
               type="button"
               onClick={onOpenAgents}
               className="shrink-0 rounded-md px-3 py-2 font-medium text-indigo-400 active:bg-neutral-800"
             >
-              เพิ่ม Agent
+              เพิ่ม AI
             </button>
           </div>
         </div>
@@ -424,8 +581,8 @@ export default function ChatView({
             maxLength={20000}
             onChange={(e) => onDraftChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="สั่งงานทีม AI..."
-            aria-label="คำสั่งงาน"
+            placeholder="พิมพ์ข้อความ..."
+            aria-label="ข้อความ"
             className="block max-h-40 min-h-11 w-full resize-none rounded-3xl border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-base leading-6 text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-neutral-600"
           />
           <button

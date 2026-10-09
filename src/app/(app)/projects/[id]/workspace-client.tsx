@@ -44,7 +44,8 @@ function sameMessages(a: Message[], b: Message[]): boolean {
     a.length === b.length &&
     a.every((m, i) => {
       const o = b[i]
-      return !!o && m.id === o.id && m.content.length === o.content.length
+      // plan_status ต้องนับด้วย: กด "ไม่เอาแผนนี้" แล้วมีแค่สถานะที่เปลี่ยน ไม่มีข้อความใหม่
+      return !!o && m.id === o.id && m.content.length === o.content.length && (m.plan_status ?? null) === (o.plan_status ?? null)
     })
   )
 }
@@ -130,7 +131,7 @@ export default function WorkspaceClient({
   const running = tasks.filter((t) => t.status === 'running').length
   const pending = tasks.filter((t) => t.status === 'pending').length
   const activeCount = running + pending
-  const hasManager = agentsLoaded ? agents.some((a) => a.role === 'manager') : null
+  const hasAgents = agentsLoaded ? agents.length > 0 : null
 
   const navItems: NavItem[] = useMemo(
     () => [
@@ -199,7 +200,7 @@ export default function WorkspaceClient({
           messages={messages}
           running={running}
           pending={pending}
-          hasManager={hasManager}
+          hasAgents={hasAgents}
           draft={draft}
           onDraftChange={setDraft}
           onSent={() => void refresh()}
