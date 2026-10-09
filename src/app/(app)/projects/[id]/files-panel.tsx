@@ -47,6 +47,7 @@ const DownloadIcon = () => <Icon><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></Ico
 const EditIcon = () => <Icon><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></Icon>
 const UploadIcon = () => <Icon><path d="M12 16V4M7 9l5-5 5 5M5 20h14" /></Icon>
 const TrashIcon = () => <Icon><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" /></Icon>
+const CheckSquareIcon = () => <Icon><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 12l3 3 5-6" /></Icon>
 
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -111,6 +112,9 @@ function FileList({
 }) {
   const [files, setFiles] = useState<FileItem[] | null>(null)
   const [error, setError] = useState('')
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/projects/${projectId}/files`)
@@ -123,53 +127,133 @@ function FileList({
   }, [projectId])
 
   // agent อาจสร้างไฟล์ระหว่างที่เปิดหน้านี้อยู่ จึงรีเฟรชเป็นระยะ
+  // (หยุดรีเฟรชอัตโนมัติระหว่างกำลังเลือกไฟล์ลบ กันรายการสั่นตอนผู้ใช้กำลังกดเลือกอยู่)
   useEffect(() => {
     void load()
+    if (selectMode) return
     const t = setInterval(() => void load(), 5000)
     return () => clearInterval(t)
-  }, [load])
+  }, [load, selectMode])
+
+  function toggleSelectMode() {
+    setSelectMode((on) => !on)
+    setSelected(new Set())
+  }
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    if (!files) return
+    setSelected((prev) => (prev.size === files.length ? new Set() : new Set(files.map((f) => f.id))))
+  }
+
+  async function deleteSelected() {
+    if (selected.size === 0 || deleting) return
+    if (!window.confirm(`ลบ ${selected.size} ไฟล์ที่เลือก?`)) return
+
+    setDeleting(true)
+    setError('')
+    const res = await fetch(`/api/projects/${projectId}/files/batch-delete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ file_ids: [...selected] }),
+    })
+    setDeleting(false)
+    if (!res.ok) {
+      setError(await readError(res, 'ลบไฟล์ไม่สำเร็จ'))
+      return
+    }
+    setSelected(new Set())
+    setSelectMode(false)
+    await load()
+  }
 
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-neutral-300">Files{files ? ` (${files.length})` : ''}</h2>
         <div className="flex items-center gap-2">
-          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-neutral-700 px-3 py-2 text-sm text-neutral-200 transition hover:bg-neutral-800 focus-within:border-indigo-500">
-            <UploadIcon />
-            อัปโหลด zip
-            <input
-              type="file"
-              accept=".zip,application/zip,application/x-zip-compressed"
-              className="sr-only"
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                const picked = e.target.files?.[0]
-                e.target.value = '' // เลือกไฟล์เดิมซ้ำได้อีก
-                if (picked) onImport(picked)
-              }}
-            />
-          </label>
-          <button onClick={onNew} className={primaryBtn}>
-            <PlusIcon />
-            ไฟล์ใหม่
-          </button>
+          {selectMode ? (
+            <>
+              <button onClick={toggleAll} className={ghostBtn}>
+                {files && selected.size === files.length ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+              </button>
+              <button
+                onClick={deleteSelected}
+                disabled={selected.size === 0 || deleting}
+                className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-2 text-sm font-medium hover:bg-red-500 disabled:opacity-50"
+              >
+                <TrashIcon />
+                {deleting ? 'กำลังลบ...' : `ลบ (${selected.size})`}
+              </button>
+              <button onClick={toggleSelectMode} className={ghostBtn}>
+                ยกเลิก
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={toggleSelectMode} className={ghostBtn}>
+                <CheckSquareIcon />
+                เลือกหลายไฟล์
+              </button>
+              <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border border-neutral-700 px-3 py-2 text-sm text-neutral-200 transition hover:bg-neutral-800 focus-within:border-indigo-500">
+                <UploadIcon />
+                อัปโหลด zip
+                <input
+                  type="file"
+                  accept=".zip,application/zip,application/x-zip-compressed"
+                  className="sr-only"
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                    const picked = e.target.files?.[0]
+                    e.target.value = '' // เลือกไฟล์เดิมซ้ำได้อีก
+                    if (picked) onImport(picked)
+                  }}
+                />
+              </label>
+              <button onClick={onNew} className={primaryBtn}>
+                <PlusIcon />
+                ไฟล์ใหม่
+              </button>
+            </>
+          )}
         </div>
       </div>
       {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
       <div className="space-y-2">
         {files?.map((f) => (
-          <button
+          <div
             key={f.id}
-            onClick={() => onOpen(f.id)}
             className="flex w-full items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900 p-3 text-left text-sm transition hover:border-neutral-700"
           >
-            <span className="shrink-0 text-neutral-500">
-              <FileIcon />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate font-mono text-[13px]">{f.path}</span>
-              <span className="block text-xs text-neutral-500">แก้ล่าสุด {formatTime(f.updated_at)}</span>
-            </span>
-          </button>
+            {selectMode && (
+              <input
+                type="checkbox"
+                checked={selected.has(f.id)}
+                onChange={() => toggleOne(f.id)}
+                className="size-4 shrink-0 accent-indigo-600"
+                aria-label={`เลือก ${f.path}`}
+              />
+            )}
+            <button
+              onClick={() => (selectMode ? toggleOne(f.id) : onOpen(f.id))}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <span className="shrink-0 text-neutral-500">
+                <FileIcon />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-mono text-[13px]">{f.path}</span>
+                <span className="block text-xs text-neutral-500">แก้ล่าสุด {formatTime(f.updated_at)}</span>
+              </span>
+            </button>
+          </div>
         ))}
         {files && files.length === 0 && (
           <p className="text-sm text-neutral-500">
