@@ -36,3 +36,12 @@ export function isValidEnum<T extends string>(value: unknown, allowed: readonly 
 export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
 }
+
+/**
+ * ข้อความแชทของผู้ใช้: ตัดอักขระควบคุม (รวม NUL ที่ Postgres เก็บไม่ได้) แล้วจำกัดความยาว
+ * ไม่ตัดแท็ก HTML แบบ sanitizeText เพราะผู้ใช้อาจวางโค้ดมาคุย — ตอนแสดงผล React escape ให้อยู่แล้ว
+ */
+export function cleanChatText(input: unknown, maxLength = 20_000): string {
+  if (typeof input !== 'string') return ''
+  return input.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, maxLength)
+}
