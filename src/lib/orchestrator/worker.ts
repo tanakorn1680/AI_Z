@@ -24,9 +24,14 @@ interface TaskRow {
 }
 
 // rate limit: รอแล้วลองใหม่ได้มากกว่า max_attempts ปกติ เพราะไม่ใช่ความผิดของ task
-const RATE_LIMIT_MAX_ATTEMPTS = 6
-// provider บอกให้รอนานกว่านี้ = โควตารายวันหมด ไม่คุ้มรอ ปิดงานพร้อมบอกสาเหตุ
-const RATE_LIMIT_MAX_WAIT_SECONDS = 600
+// ไม่จำกัดจำนวนครั้งด้วยตัวเลขคงที่อีกต่อไป (ดู RATE_LIMIT_MAX_WAIT_SECONDS) — attempts ยังนับไว้
+// ใช้โชว์ในข้อความสถานะเฉยๆ ไม่ใช้ตัดสินใจเลิก retry แล้ว เพราะผู้ใช้ต้องการให้รอจนกว่าโควตาจะคืนเสมอ
+const RATE_LIMIT_MAX_ATTEMPTS = Number.POSITIVE_INFINITY
+// provider บอกให้รอนานกว่านี้ถือว่าผิดปกติเกินจริง (ไม่ใช่แค่โควตารายวัน) จึงยอมแพ้
+// ตั้งไว้ 24 ชม. เพราะโควตารายวันของทุก provider ที่รองรับอยู่รีเซ็ตภายใน 24 ชม.เสมอ
+// (ยาวกว่านี้แปลว่า provider คืนค่าผิดปกติ ไม่ใช่โควตารายวันปกติ) Vercel Queue รองรับ delay ได้ถึง 7 วัน
+// จึงไม่ใช่ข้อจำกัดทางเทคนิค — นี่คือการตัดสินใจเรื่อง UX ล้วนๆ
+const RATE_LIMIT_MAX_WAIT_SECONDS = 24 * 60 * 60
 
 /**
  * ประมวลผล Task เดียวให้จบ: claim → เรียก AI → บันทึกผล → enqueue task ถัดไปที่พร้อม
@@ -177,7 +182,7 @@ async function handleTaskFailure(admin: SupabaseClient, task: TaskRow, err: unkn
         .from('tasks')
         .update({
           status: 'pending',
-          error: `โควตา AI เต็มชั่วคราว จะลองใหม่อัตโนมัติใน ~${wait} วินาที (ครั้งที่ ${attempts}/${RATE_LIMIT_MAX_ATTEMPTS})\n${message}`.slice(0, 2000),
+          error: `โควตา AI เต็มชั่วคราว จะลองใหม่อัตโนมัติใน ~${wait} วินาที (ลองมาแล้ว ${attempts} ครั้ง จะรอจนกว่าโควตาจะคืน)\n${message}`.slice(0, 2000),
         })
         .eq('id', task.id)
         .eq('status', 'running')
